@@ -1,7 +1,7 @@
 import { eq, and, asc, sql } from 'drizzle-orm'
 import { fileTypeFromBuffer } from 'file-type'
 import { job, candidate, application, jobQuestion, questionResponse, document, organization, applicationSource, trackingLink } from '../../../../database/schema'
-import { publicApplicationSchema, publicJobSlugSchema } from '../../../../utils/schemas/publicApplication'
+import { parsePublicApplication, publicJobSlugSchema } from '../../../../utils/schemas/publicApplication'
 import { createPreviewReadOnlyError } from '../../../../utils/previewReadOnly'
 import { autoScoreApplication } from '../../../../utils/ai/autoScore'
 import { parseDocument } from '../../../../utils/resume-parser'
@@ -121,8 +121,9 @@ export default defineEventHandler(async (event) => {
       }
     }
 
-    // Validate all multipart text fields through the same Zod schema as JSON
-    const validated = publicApplicationSchema.parse({
+    // Validate all multipart text fields through the same validator as JSON, so
+    // a bad field is a 400 naming the field on both paths rather than a 500 here
+    const validated = parsePublicApplication({
       firstName: fields.firstName?.trim() ?? '',
       lastName: fields.lastName?.trim() ?? '',
       email: fields.email?.trim() ?? '',
@@ -153,7 +154,7 @@ export default defineEventHandler(async (event) => {
     utmContent = validated.utmContent
   } else {
     // Standard JSON body
-    const body = await readValidatedBody(event, publicApplicationSchema.parse)
+    const body = parsePublicApplication(await readBody(event))
     firstName = body.firstName
     lastName = body.lastName
     email = body.email

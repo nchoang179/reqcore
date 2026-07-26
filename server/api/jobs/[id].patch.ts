@@ -35,11 +35,20 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  // Regenerate slug when title or custom slug changes
+  // Slug changes are deliberate only — a title edit on a published job must not
+  // move its public URL, because every indexed, reposted and emailed link to it
+  // would hard-404 (there is no slug history to redirect from).
   const updates: Record<string, unknown> = { ...body, updatedAt: new Date() }
   delete (updates as any).slug // remove raw slug from spread — we set it explicitly below
-  if (body.title || body.slug) {
-    updates.slug = generateJobSlug(body.title ?? existing.title, id, body.slug)
+  const nextSlug = resolveJobSlugUpdate({
+    id,
+    currentStatus: existing.status,
+    currentTitle: existing.title,
+    newTitle: body.title,
+    customSlug: body.slug,
+  })
+  if (nextSlug) {
+    updates.slug = nextSlug
   }
 
   const [updated] = await db.update(job)

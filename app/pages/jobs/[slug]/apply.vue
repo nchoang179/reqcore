@@ -10,13 +10,23 @@ const jobSlug = route.params.slug as string
 const { track } = useTrack()
 const { t } = useI18n()
 
+/**
+ * Read a single value from a query param. Job boards and ad platforms re-append
+ * tracking params (`?ref=a&ref=b`), which Vue Router surfaces as an array — send
+ * one string so attribution never blocks the submission.
+ */
+function firstQueryValue(value: unknown): string | undefined {
+  const raw = Array.isArray(value) ? value.find((v) => typeof v === 'string' && v.length > 0) : value
+  return typeof raw === 'string' && raw.length > 0 ? raw : undefined
+}
+
 // Capture source tracking params from the URL
-const sourceRef = (route.query.ref as string) || undefined
-const utmSource = (route.query.utm_source as string) || undefined
-const utmMedium = (route.query.utm_medium as string) || undefined
-const utmCampaign = (route.query.utm_campaign as string) || undefined
-const utmTerm = (route.query.utm_term as string) || undefined
-const utmContent = (route.query.utm_content as string) || undefined
+const sourceRef = firstQueryValue(route.query.ref)
+const utmSource = firstQueryValue(route.query.utm_source)
+const utmMedium = firstQueryValue(route.query.utm_medium)
+const utmCampaign = firstQueryValue(route.query.utm_campaign)
+const utmTerm = firstQueryValue(route.query.utm_term)
+const utmContent = firstQueryValue(route.query.utm_content)
 
 onMounted(() => track('application_started', { slug: jobSlug }))
 
@@ -243,6 +253,12 @@ async function handleSubmit() {
       errors.value.resume = message
     } else if (status === 502 && message.toLowerCase().includes('resume')) {
       errors.value.resume = message
+    }
+
+    // Field-level validation failures name their field — show it inline too
+    const field = err.data?.data?.field
+    if (status === 400 && typeof field === 'string' && field in form.value) {
+      errors.value[field] = message
     }
   } finally {
     isSubmitting.value = false
