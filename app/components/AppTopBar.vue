@@ -6,7 +6,7 @@ import {
   ChevronDown, Menu, X, Users, ChevronLeft,
   LayoutDashboard, Calendar, ArrowUpCircle,
   Sparkles, Radio, History,
-  MessageCircle, Languages, Lock, Inbox, Upload, Zap,
+  MessageCircle, Languages, Lock, Inbox, Upload, Zap, Megaphone,
 } from 'lucide-vue-next'
 import type { PlanFeature } from '~~/shared/billing'
 
@@ -107,6 +107,7 @@ const jobTabs = computed(() => {
   const base = `/dashboard/jobs/${activeJobId.value}`
   return [
     { label: 'Pipeline', to: base, icon: Kanban, exact: true },
+    { label: 'Promote', to: `${base}/promote`, icon: Megaphone, exact: true },
     { label: 'Table', to: `${base}/candidates`, icon: Table2, exact: true },
     { label: 'Import', to: `${base}/import`, icon: Upload, exact: true },
     { label: 'Inbox', to: `${base}/inbox`, icon: Inbox, exact: true },

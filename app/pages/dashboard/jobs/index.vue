@@ -2,7 +2,7 @@
 import {
   Briefcase, Bell, Kanban,
   MapPin, Search, SlidersHorizontal, X,
-  LayoutGrid, List, Table2, ArrowUp, ArrowDown, ArrowUpDown,
+  LayoutGrid, List, Table2, ArrowUp, ArrowDown, ArrowUpDown, Megaphone,
 } from 'lucide-vue-next'
 
 definePageMeta({
@@ -181,6 +181,16 @@ const statusPriority: Record<string, number> = {
 
 function totalActive(pipeline: any) {
   return (pipeline?.new ?? 0) + (pipeline?.screening ?? 0) + (pipeline?.interview ?? 0) + (pipeline?.offer ?? 0) + (pipeline?.hired ?? 0)
+}
+
+/**
+ * Whether a job has never received an application. Unlike `totalActive`, this
+ * counts rejected candidates — a role that rejected five people has a
+ * pipeline problem, not a distribution problem, and shouldn't be nudged to
+ * promote itself.
+ */
+function hasNoApplicants(pipeline: any) {
+  return totalActive(pipeline) + (pipeline?.rejected ?? 0) === 0
 }
 
 const sortedJobs = computed(() => {
@@ -794,6 +804,23 @@ const noResults = computed(() => !isEmpty.value && filteredJobs.value.length ===
               <span class="inline-flex items-center gap-1 text-xs text-brand-600 dark:text-brand-400 font-medium">
                 <Kanban class="size-3" />
                 Review
+              </span>
+            </div>
+
+            <!-- An open role with nothing in the pipeline is the dead end this
+                 view used to leave the user at. The card links to the pipeline,
+                 which carries the actual "Promote this job" action — a nested
+                 link here would be invalid markup. -->
+            <div
+              v-else-if="j.status === 'open' && hasNoApplicants(j.pipeline)"
+              class="flex items-center justify-between gap-2 -mx-4 -mb-4 px-4 py-2 rounded-b-xl bg-surface-50 dark:bg-surface-800/40 border-t border-surface-100 dark:border-surface-800"
+            >
+              <span class="text-xs text-surface-500 dark:text-surface-400">
+                No applicants yet
+              </span>
+              <span class="inline-flex items-center gap-1 text-xs font-medium text-brand-600 dark:text-brand-400">
+                <Megaphone class="size-3" />
+                Promote
               </span>
             </div>
           </NuxtLink>

@@ -121,6 +121,14 @@ export const job = pgTable('job', {
    * once and never reset — reopening a closed role keeps its original age.
    */
   publishedAt: timestamp('published_at'),
+  /**
+   * AI-written social copy for the Promote tab, cached so reopening the tab
+   * doesn't re-bill a generation. Regenerating overwrites it.
+   */
+  shareCopy: jsonb('share_copy').$type<{
+    channels: Record<string, string>
+    generatedAt: string
+  }>(),
   // ── Application form settings ──
   phoneRequirement: text('phone_requirement').$type<'hidden' | 'optional' | 'required'>().notNull().default('optional'),
   requireResume: boolean('require_resume').notNull().default(false),
