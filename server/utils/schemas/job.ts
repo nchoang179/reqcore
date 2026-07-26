@@ -8,6 +8,18 @@ export { JOB_STATUS_TRANSITIONS } from '../../../shared/status-transitions'
  * Which optional candidate data sources the AI analysis reads.
  * A resume is included automatically when present.
  */
+/**
+ * ISO 3166-1 alpha-2 country code, normalized to uppercase.
+ * Job board feeds match on the two-letter code, so "no", "No" and "NO" must all
+ * store identically.
+ */
+export const countryCodeSchema = z
+  .string()
+  .trim()
+  .length(2, 'Use a 2-letter country code')
+  .regex(/^[A-Za-z]{2}$/, 'Use a 2-letter country code')
+  .transform(value => value.toUpperCase())
+
 export const analysisContextSchema = z.object({
   coverLetter: z.boolean(),
   screeningAnswers: z.boolean(),
@@ -47,6 +59,13 @@ export const createJobSchema = z.object({
   autoScoreOnApply: z.boolean().optional().default(false),
   /** Experience level required for this role */
   experienceLevel: z.enum(['junior', 'mid', 'senior', 'lead']).optional(),
+  /** Structured location — supplements the free-text `location` display string */
+  locationCity: z.string().trim().max(120).nullable().optional(),
+  locationRegion: z.string().trim().max(120).nullable().optional(),
+  locationCountry: countryCodeSchema.nullable().optional(),
+  department: z.string().trim().max(120).nullable().optional(),
+  /** Whether to syndicate this job to external job boards. Defaults on. */
+  distributeToBoards: z.boolean().optional().default(true),
 })
 
 /**
@@ -103,6 +122,12 @@ export const updateJobSchema = z.object({
   /** Experience level required for this role */
   experienceLevel: z.enum(['junior', 'mid', 'senior', 'lead']).nullable().optional(),
   status: z.enum(['draft', 'open', 'closed', 'archived']).optional(),
+  /** Structured location — pass null to explicitly clear a part */
+  locationCity: z.string().trim().max(120).nullable().optional(),
+  locationRegion: z.string().trim().max(120).nullable().optional(),
+  locationCountry: countryCodeSchema.nullable().optional(),
+  department: z.string().trim().max(120).nullable().optional(),
+  distributeToBoards: z.boolean().optional(),
 })
 
 /** Schema for job list query params */

@@ -98,6 +98,29 @@ export const job = pgTable('job', {
   validThrough: timestamp('valid_through'),
   /** Experience level required for this role */
   experienceLevel: experienceLevelEnum('experience_level'),
+  // ── Structured location ──
+  // `location` above stays the free-text display string. These supplement it:
+  // job board feeds reject or heavily downrank postings without a country, and
+  // schema.org PostalAddress wants the parts separated.
+  locationCity: text('location_city'),
+  locationRegion: text('location_region'),
+  /** ISO 3166-1 alpha-2, uppercased. Required to appear in the job board feed. */
+  locationCountry: text('location_country'),
+  /** Maps to <category> in the feed. */
+  department: text('department'),
+  // ── Distribution ──
+  /**
+   * Whether this job is syndicated to external job boards via /jobs.xml.
+   * Defaults on — publishing is the distribution action. Recruiters opt a
+   * confidential search out per job.
+   */
+  distributeToBoards: boolean('distribute_to_boards').notNull().default(true),
+  /**
+   * First time this job went `open`. Feeds and Google for Jobs rank on posting
+   * age, so `createdAt` misreports a draft that sat unpublished for weeks. Set
+   * once and never reset — reopening a closed role keeps its original age.
+   */
+  publishedAt: timestamp('published_at'),
   // ── Application form settings ──
   phoneRequirement: text('phone_requirement').$type<'hidden' | 'optional' | 'required'>().notNull().default('optional'),
   requireResume: boolean('require_resume').notNull().default(false),
@@ -352,6 +375,10 @@ export const orgSettings = pgTable('org_settings', {
   privacyPolicyUrl: text('privacy_policy_url'),
   privacyPolicyText: text('privacy_policy_text'),
   privacyContactEmail: text('privacy_contact_email'),
+  // ── Company profile (used by the job board feed's <company> block) ──
+  /** Public company website. Aggregators rank feeds with a resolvable company URL higher. */
+  websiteUrl: text('website_url'),
+  companyDescription: text('company_description'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 }, (t) => ([
@@ -739,6 +766,10 @@ export const sourceChannelEnum = pgEnum('source_channel', [
   'greenhouse_board', 'google_jobs', 'facebook', 'twitter', 'instagram',
   'tiktok', 'reddit', 'referral', 'career_site', 'email',
   'event', 'agency', 'direct', 'other', 'custom',
+  // Aggregators that ingest the platform-wide /jobs.xml feed. Applications
+  // arriving from them are attributed via the utm_source stamped into the feed.
+  'jooble', 'adzuna', 'careerjet', 'talent_com', 'jobsora',
+  'jora', 'whatjobs', 'whatsapp',
 ])
 
 /**

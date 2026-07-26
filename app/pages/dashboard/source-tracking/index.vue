@@ -7,6 +7,7 @@ import {
   Copy, ToggleLeft, ToggleRight,
   Trash2, ChevronDown, ChevronUp, X,
 } from 'lucide-vue-next'
+import { sourceChannelLabel } from '~~/shared/source-channels'
 
 definePageMeta({
   layout: 'dashboard',
@@ -183,39 +184,6 @@ async function copyTrackingUrl(code: string) {
 // Display helpers
 // ─────────────────────────────────────────────
 
-const channelLabels: Record<string, string> = {
-  linkedin: 'LinkedIn',
-  indeed: 'Indeed',
-  glassdoor: 'Glassdoor',
-  ziprecruiter: 'ZipRecruiter',
-  monster: 'Monster',
-  handshake: 'Handshake',
-  angellist: 'AngelList',
-  wellfound: 'Wellfound',
-  dice: 'Dice',
-  stackoverflow: 'Stack Overflow',
-  weworkremotely: 'We Work Remotely',
-  remoteok: 'Remote OK',
-  builtin: 'Built In',
-  hired: 'Hired',
-  lever: 'Lever',
-  greenhouse_board: 'Greenhouse',
-  google_jobs: 'Google Jobs',
-  facebook: 'Facebook',
-  twitter: 'X / Twitter',
-  instagram: 'Instagram',
-  tiktok: 'TikTok',
-  reddit: 'Reddit',
-  referral: 'Referral',
-  career_site: 'Career Site',
-  email: 'Email',
-  event: 'Event',
-  agency: 'Agency',
-  direct: 'Direct',
-  other: 'Other',
-  custom: 'Custom',
-}
-
 const channelColors: Record<string, string> = {
   linkedin: 'bg-blue-500',
   indeed: 'bg-indigo-500',
@@ -256,9 +224,7 @@ function getChannelColor(channel: string) {
   return channelColors[channel] ?? 'bg-surface-400 dark:bg-surface-500'
 }
 
-function getChannelLabel(channel: string) {
-  return channelLabels[channel] ?? channel
-}
+const getChannelLabel = sourceChannelLabel
 
 const statusBadgeClasses: Record<string, string> = {
   new: 'bg-blue-50 text-blue-700 ring-blue-200/60 dark:bg-blue-950 dark:text-blue-400 dark:ring-blue-800/40',

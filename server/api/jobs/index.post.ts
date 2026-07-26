@@ -38,6 +38,13 @@ export default defineEventHandler(async (event) => {
       requireCoverLetter: body.requireCoverLetter,
       autoScoreOnApply: body.autoScoreOnApply,
       experienceLevel: body.experienceLevel,
+      locationCity: body.locationCity,
+      locationRegion: body.locationRegion,
+      locationCountry: body.locationCountry,
+      department: body.department,
+      distributeToBoards: body.distributeToBoards,
+      // Created straight into `open` — this is the moment it goes public.
+      publishedAt: body.status === 'open' ? new Date() : null,
     }).returning({
       id: job.id,
       title: job.title,
@@ -58,6 +65,12 @@ export default defineEventHandler(async (event) => {
       requireCoverLetter: job.requireCoverLetter,
       autoScoreOnApply: job.autoScoreOnApply,
       experienceLevel: job.experienceLevel,
+      locationCity: job.locationCity,
+      locationRegion: job.locationRegion,
+      locationCountry: job.locationCountry,
+      department: job.department,
+      distributeToBoards: job.distributeToBoards,
+      publishedAt: job.publishedAt,
       createdAt: job.createdAt,
       updatedAt: job.updatedAt,
     })

@@ -12,7 +12,7 @@ export default defineEventHandler(async (event) => {
   // Fetch existing job — needed for status transition check and slug regeneration
   const existing = await db.query.job.findFirst({
     where: and(eq(job.id, id), eq(job.organizationId, orgId)),
-    columns: { status: true, title: true, slug: true },
+    columns: { status: true, title: true, slug: true, publishedAt: true },
   })
 
   if (!existing) {
@@ -42,6 +42,13 @@ export default defineEventHandler(async (event) => {
     updates.slug = generateJobSlug(body.title ?? existing.title, id, body.slug)
   }
 
+  // Stamp the first time this role goes public. Guarded on `publishedAt` being
+  // null rather than on the previous status, so closing and re-opening a role
+  // keeps its original posting age instead of presenting it to boards as new.
+  if (body.status === 'open' && !existing.publishedAt) {
+    updates.publishedAt = new Date()
+  }
+
   const [updated] = await db.update(job)
     .set(updates)
     .where(and(eq(job.id, id), eq(job.organizationId, orgId)))
@@ -66,6 +73,12 @@ export default defineEventHandler(async (event) => {
       autoScoreOnApply: job.autoScoreOnApply,
       analysisContext: job.analysisContext,
       experienceLevel: job.experienceLevel,
+      locationCity: job.locationCity,
+      locationRegion: job.locationRegion,
+      locationCountry: job.locationCountry,
+      department: job.department,
+      distributeToBoards: job.distributeToBoards,
+      publishedAt: job.publishedAt,
       createdAt: job.createdAt,
       updatedAt: job.updatedAt,
     })

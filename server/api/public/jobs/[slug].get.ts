@@ -35,6 +35,13 @@ export default defineEventHandler(async (event) => {
       requireResume: true,
       requireCoverLetter: true,
       createdAt: true,
+      // Structured location + posting date feed the JobPosting JSON-LD that
+      // Google for Jobs reads.
+      locationCity: true,
+      locationRegion: true,
+      locationCountry: true,
+      department: true,
+      publishedAt: true,
     },
     with: {
       organization: {

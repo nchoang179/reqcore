@@ -6,6 +6,7 @@ import {
   ExternalLink, AlertCircle, CalendarDays,
   Hash, Tag, Layers, Pencil, X, ChevronDown,
 } from 'lucide-vue-next'
+import { sourceChannelLabel } from '~~/shared/source-channels'
 
 definePageMeta({
   layout: 'dashboard',
@@ -93,19 +94,6 @@ async function copyTrackingUrl() {
 // Display helpers
 // ─────────────────────────────────────────────
 
-const channelLabels: Record<string, string> = {
-  linkedin: 'LinkedIn', indeed: 'Indeed', glassdoor: 'Glassdoor',
-  ziprecruiter: 'ZipRecruiter', monster: 'Monster', handshake: 'Handshake',
-  angellist: 'AngelList', wellfound: 'Wellfound', dice: 'Dice',
-  stackoverflow: 'Stack Overflow', weworkremotely: 'We Work Remotely',
-  remoteok: 'Remote OK', builtin: 'Built In', hired: 'Hired',
-  lever: 'Lever', greenhouse_board: 'Greenhouse', google_jobs: 'Google Jobs',
-  facebook: 'Facebook', twitter: 'X / Twitter', instagram: 'Instagram',
-  tiktok: 'TikTok', reddit: 'Reddit', referral: 'Referral',
-  career_site: 'Career Site', email: 'Email', event: 'Event',
-  agency: 'Agency', direct: 'Direct', other: 'Other', custom: 'Custom',
-}
-
 const channelColors: Record<string, string> = {
   linkedin: 'bg-blue-500', indeed: 'bg-indigo-500', glassdoor: 'bg-emerald-500',
   ziprecruiter: 'bg-green-600', monster: 'bg-violet-500', google_jobs: 'bg-red-500',
@@ -143,9 +131,7 @@ function getChannelColor(channel: string) {
   return channelColors[channel] ?? 'bg-surface-400 dark:bg-surface-500'
 }
 
-function getChannelLabel(channel: string) {
-  return channelLabels[channel] ?? channel
-}
+const getChannelLabel = sourceChannelLabel
 
 function formatDate(dateStr: string) {
   const d = new Date(dateStr)
