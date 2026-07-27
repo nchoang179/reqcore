@@ -21,8 +21,17 @@ import {
   SlidersHorizontal,
   Share2,
   Globe2,
+  FlaskConical,
 } from 'lucide-vue-next'
 import { z } from 'zod'
+import type { LocationSelection } from '~/components/LocationCombobox.vue'
+import { formatJobLocation, isValidPostalCode, normalizePostalCode, POSTAL_CODE_MAX_LENGTH } from '~~/shared/job-location'
+import { descriptionLength, missingPublishRequirements, MIN_DESCRIPTION_CHARS } from '~~/shared/job-publish'
+import {
+  SAMPLE_JOB_FORM,
+  SAMPLE_JOB_QUESTIONS,
+  SAMPLE_SCORING_CRITERIA,
+} from '~~/shared/sample-job'
 
 definePageMeta({
   layout: 'dashboard',
@@ -36,6 +45,7 @@ useSeoMeta({
 })
 
 const localePath = useLocalePath()
+const route = useRoute()
 const { createJob } = useJobs()
 const { track } = useTrack()
 const toast = useToast()
@@ -83,11 +93,40 @@ const steps = [
 const form = ref({
   title: '',
   description: '',
-  location: '',
+  // Structured location. The free-text `job.location` display string is derived
+  // from these server-side, so the wizard never sends one.
+  locationCity: null as string | null,
+  locationRegion: null as string | null,
+  locationCountry: null as string | null,
+  locationPostalCode: null as string | null,
   type: 'full_time' as 'full_time' | 'part_time' | 'contract' | 'internship',
   experienceLevel: 'mid' as 'junior' | 'mid' | 'senior' | 'lead',
   remoteStatus: undefined as 'remote' | 'hybrid' | 'onsite' | undefined,
 })
+
+/** Adapter between the three flat form fields and the picker's single value. */
+const locationSelection = computed<LocationSelection | null>({
+  get: () => form.value.locationCountry
+    ? { city: form.value.locationCity, region: form.value.locationRegion, country: form.value.locationCountry }
+    : null,
+  set: (value) => {
+    form.value.locationCity = value?.city ?? null
+    form.value.locationRegion = value?.region ?? null
+    form.value.locationCountry = value?.country ?? null
+    // A postal code belongs to the place that was just replaced, so it cannot
+    // survive the change — "0150" under a newly picked Berlin is worse than
+    // nothing.
+    form.value.locationPostalCode = null
+  },
+})
+
+const locationDisplay = computed(() => formatJobLocation(locationSelection.value))
+
+/** The candidate-facing preview wants the display string, not the parts. */
+const previewJobDetails = computed(() => ({
+  ...form.value,
+  location: locationDisplay.value,
+}))
 
 // Step 2: Application form (client-only for now)
 const applicationForm = ref({
@@ -283,13 +322,25 @@ function autoGenerateKey(name: string): string {
 }
 
 const isSubmitting = ref(false)
+/** Covers the gap between "job created" and the shortlist being ready to show. */
+const isPopulatingSample = ref(false)
 const errors = ref<Record<string, string>>({})
 const linkCopied = ref(false)
 
 const formSchema = z.object({
   title: z.string().trim().min(1, 'Title is required').max(200, 'Title must be 200 characters or less'),
   description: z.string().trim().max(100_000, 'Description is too long'),
-  location: z.string().trim().max(500, 'Location must be 500 characters or less'),
+  // Optional here on purpose: a draft may be half-filled. Publishing is what
+  // requires a placeable location — see `validatePublishLocation`.
+  locationCity: z.string().trim().max(120).nullable().default(null),
+  locationRegion: z.string().trim().max(120).nullable().default(null),
+  locationCountry: z.string().trim().length(2).nullable().default(null),
+  locationPostalCode: z.string().trim()
+    .max(POSTAL_CODE_MAX_LENGTH, `Postal code must be ${POSTAL_CODE_MAX_LENGTH} characters or less`)
+    .refine(value => !value || isValidPostalCode(value), 'Enter a postal code, not a street address')
+    .transform(normalizePostalCode)
+    .nullable()
+    .default(null),
   type: z.enum(['full_time', 'part_time', 'contract', 'internship']),
   experienceLevel: z.enum(['junior', 'mid', 'senior', 'lead']),
   remoteStatus: z.enum(['remote', 'hybrid', 'onsite']).optional(),
@@ -328,6 +379,17 @@ const isAiConfigured = computed(() => {
   return Array.isArray(aiConfigData.value) && aiConfigData.value.some((c) => c.hasApiKey)
 })
 
+/**
+ * Whether publishing also syndicates this role to the external job boards.
+ *
+ * Chosen on step 4 but declared here, with the rest of the persisted wizard
+ * state, so the autosave below can read it. Defaults on: free distribution is
+ * why most people publish at all. What it buys is the ability to say no *before*
+ * the role goes out — a confidential or internal-only search cannot be un-sent
+ * once the aggregators have picked it up.
+ */
+const distributeToBoards = ref(true)
+
 // Auto-save to localStorage
 const AUTO_SAVE_KEY = 'reqcore-job-draft'
 
@@ -340,6 +402,7 @@ function saveFormToStorage() {
       scoringCriteria: scoringCriteria.value,
       scoringMode: scoringMode.value,
       autoScoreOnApply: autoScoreOnApply.value,
+      distributeToBoards: distributeToBoards.value,
       currentStep: currentStep.value,
     }
     localStorage.setItem(AUTO_SAVE_KEY, JSON.stringify(data))
@@ -362,6 +425,7 @@ function restoreFormFromStorage() {
       scoringCriteria: z.unknown().optional(),
       scoringMode: z.unknown().optional(),
       autoScoreOnApply: z.unknown().optional(),
+      distributeToBoards: z.unknown().optional(),
       currentStep: z.unknown().optional(),
     }).parse(JSON.parse(raw))
 
@@ -385,6 +449,9 @@ function restoreFormFromStorage() {
     const storedAutoScore = z.boolean().safeParse(data.autoScoreOnApply)
     if (storedAutoScore.success) autoScoreOnApply.value = storedAutoScore.data
 
+    const storedDistribute = z.boolean().safeParse(data.distributeToBoards)
+    if (storedDistribute.success) distributeToBoards.value = storedDistribute.data
+
     const storedStep = z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]).safeParse(data.currentStep)
     currentStep.value = storedStep.success && storedForm.success ? storedStep.data : 1
   } catch { /* corrupted data, ignore */ }
@@ -395,7 +462,68 @@ function clearFormStorage() {
   try { localStorage.removeItem(AUTO_SAVE_KEY) } catch { /* ignore */ }
 }
 
+// ─────────────────────────────────────────────
+// Test mode (?mode=test)
+// ─────────────────────────────────────────────
+
+/**
+ * The walkthrough for someone evaluating Reqcore rather than hiring.
+ *
+ * They are taken through the real wizard on purpose — trying the create-a-job
+ * flow is usually the thing they came to do, so replacing it with a canned
+ * preview would skip the tour. What they are spared is the blank page: every
+ * step arrives filled in with a believable role they can read, edit or click
+ * straight past. That is the step people were faking their way through when
+ * they typed "asdf" into the title to get to the end.
+ */
+const isTestMode = computed(() => route.query.mode === 'test')
+
+/** Which steps have played their reveal, so going back doesn't replay it. */
+const revealedSteps = ref(new Set<number>())
+const isRevealing = ref(false)
+
+function applySampleContent() {
+  form.value = { ...SAMPLE_JOB_FORM }
+  applicationForm.value = {
+    phoneRequirement: 'optional',
+    requireResume: true,
+    requireCoverLetter: false,
+    questions: SAMPLE_JOB_QUESTIONS.map(q => ({ id: crypto.randomUUID(), ...q })),
+  }
+  scoringCriteria.value = SAMPLE_SCORING_CRITERIA.map(c => ({ ...c }))
+  scoringMode.value = 'custom'
+  autoScoreOnApply.value = true
+}
+
+/**
+ * Fades the step's newly-filled content in rather than having it appear
+ * instantly, so it reads as the wizard filling itself in for you. Skipped
+ * entirely under `prefers-reduced-motion`, and it never gates interaction —
+ * the fields are live throughout, the animation is only opacity.
+ */
+async function revealStep(step: number) {
+  if (!isTestMode.value || revealedSteps.value.has(step)) return
+  revealedSteps.value.add(step)
+
+  if (import.meta.client && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+
+  isRevealing.value = true
+  await nextTick()
+  setTimeout(() => { isRevealing.value = false }, 480)
+}
+
+watch(currentStep, step => revealStep(step))
+
 onMounted(() => {
+  if (isTestMode.value) {
+    // Deliberately ahead of the autosave restore: a half-finished real draft
+    // from a previous visit must not bleed into the walkthrough.
+    clearFormStorage()
+    applySampleContent()
+    revealStep(1)
+    track('sample_job_started')
+    return
+  }
   restoreFormFromStorage()
 })
 
@@ -405,7 +533,10 @@ function resetState() {
   form.value = {
     title: '',
     description: '',
-    location: '',
+    locationCity: null,
+    locationRegion: null,
+    locationCountry: null,
+    locationPostalCode: null,
     type: 'full_time',
     experienceLevel: 'mid',
     remoteStatus: undefined,
@@ -419,6 +550,7 @@ function resetState() {
   scoringCriteria.value = []
   scoringMode.value = 'none'
   autoScoreOnApply.value = false
+  distributeToBoards.value = true
   isPublished.value = false
   createdJobId.value = ''
   createdJobSlug.value = ''
@@ -434,7 +566,7 @@ watch(newJobResetSignal, (next, prev) => {
 })
 
 // Auto-save when step changes or form data changes
-watch([currentStep, form, applicationForm, scoringCriteria, scoringMode, autoScoreOnApply], () => {
+watch([currentStep, form, applicationForm, scoringCriteria, scoringMode, autoScoreOnApply, distributeToBoards], () => {
   saveFormToStorage()
 }, { deep: true })
 
@@ -464,21 +596,53 @@ function validateStep1(): boolean {
 // Pure check with no side-effects so it never populates errors on its own
 const isStep1Valid = computed(() => formSchema.safeParse(form.value).success)
 
+/**
+ * What the job boards need before this role can go live: a placeable location
+ * and a description that isn't a stub. A role published without them is live
+ * but invisible, so the wizard asks for them here rather than letting the
+ * recruiter find out from a rejected upload.
+ *
+ * "Save & exit" is the escape hatch — a draft is allowed to be incomplete.
+ */
+const publishBlockers = computed(() => missingPublishRequirements({
+  description: form.value.description,
+  locationCountry: form.value.locationCountry,
+  remoteStatus: form.value.remoteStatus,
+}))
+
+const descriptionChars = computed(() => descriptionLength(form.value.description))
+
+function validatePublishRequirements(): boolean {
+  if (publishBlockers.value.length === 0) return true
+  for (const blocker of publishBlockers.value) {
+    errors.value = { ...errors.value, [blocker.field]: blocker.reason }
+  }
+  return false
+}
+
+/** Everything Job details has to have before the wizard moves past it. */
+function validateJobDetails(): boolean {
+  // Order matters: `validateStep1` clears `errors`, so it has to run first.
+  const schemaValid = validateStep1()
+  const publishReady = validatePublishRequirements()
+  return schemaValid && publishReady
+}
+
 const canGoNext = computed(() => {
-  if (currentStep.value === 1) return isStep1Valid.value
+  if (currentStep.value === 1) return isStep1Valid.value && publishBlockers.value.length === 0
   return true
 })
 
 function goToStep(step: 1 | 2 | 3 | 4) {
   if (step === currentStep.value) return
   // Validate step 1 before leaving it
-  if (currentStep.value === 1 && step > 1 && !validateStep1()) return
+  if (currentStep.value === 1 && step > 1 && !validateJobDetails()) return
   currentStep.value = step
 }
 
 function nextStep() {
   if (currentStep.value < 4) {
-    if (currentStep.value === 1 && !validateStep1()) return
+    if (currentStep.value === 1 && !validateJobDetails()) return
     currentStep.value++
   }
 }
@@ -541,13 +705,21 @@ async function handleSubmit(mode: 'publish' | 'draft' = publishChoice.value) {
     return
   }
 
+  if (mode === 'publish' && !validatePublishRequirements()) {
+    currentStep.value = 1
+    return
+  }
+
   const normalizedForm = formSchema.parse(form.value)
   isSubmitting.value = true
   try {
     const created = await createJob({
       title: normalizedForm.title,
       description: normalizedForm.description || undefined,
-      location: normalizedForm.location || undefined,
+      locationCity: normalizedForm.locationCity,
+      locationRegion: normalizedForm.locationRegion,
+      locationCountry: normalizedForm.locationCountry,
+      locationPostalCode: normalizedForm.locationPostalCode,
       type: normalizedForm.type,
       experienceLevel: normalizedForm.experienceLevel,
       remoteStatus: normalizedForm.remoteStatus,
@@ -556,6 +728,8 @@ async function handleSubmit(mode: 'publish' | 'draft' = publishChoice.value) {
       requireCoverLetter: applicationForm.value.requireCoverLetter,
       autoScoreOnApply: scoringCriteria.value.length > 0 && autoScoreOnApply.value,
       status: mode === 'publish' ? 'open' : 'draft',
+      distributeToBoards: distributeToBoards.value,
+      isTest: isTestMode.value,
       questions: applicationForm.value.questions.map((question, index) => ({
         label: question.label,
         type: question.type,
@@ -587,6 +761,33 @@ async function handleSubmit(mode: 'publish' | 'draft' = publishChoice.value) {
 
       track('job_published')
 
+      // The payoff. A walkthrough that ends on an empty pipeline has shown a
+      // form, not a product — so the test role arrives already holding a ranked
+      // shortlist, and we take them straight to it rather than to a share link
+      // they have nobody to send.
+      if (isTestMode.value) {
+        isPopulatingSample.value = true
+        try {
+          await $fetch(`/api/jobs/${created.id}/sample-applicants`, { method: 'POST' })
+          track('sample_job_published')
+          await navigateTo(localePath(`/dashboard/jobs/${created.id}`))
+          return
+        } catch {
+          // The job itself is real and saved; only its sample applicants failed.
+          // Send them to it anyway rather than stranding them in the wizard.
+          toast.add({
+            type: 'warning',
+            title: 'Test job created',
+            message: 'We could not add the sample applicants this time.',
+          })
+          await navigateTo(localePath(`/dashboard/jobs/${created.id}`))
+          return
+        } finally {
+          isPopulatingSample.value = false
+          clearFormStorage()
+        }
+      }
+
       // Auto-copy to clipboard
       try {
         await navigator.clipboard.writeText(finalApplicationLink.value)
@@ -611,6 +812,13 @@ async function handleSubmit(mode: 'publish' | 'draft' = publishChoice.value) {
       showLimitUpsell.value = true
       track('job_limit_upsell_shown')
       return
+    }
+    // The publish guard names the field that fixes it, so send the recruiter
+    // back to Job details with the message on that input.
+    const blockedField = err?.data?.data?.field
+    if (blockedField) {
+      errors.value = { ...errors.value, [blockedField]: err.data.statusMessage }
+      currentStep.value = 1
     }
     const statusMessage = err?.data?.statusMessage ?? 'Something went wrong while creating the job.'
     toast.error('Failed to create job', {
@@ -717,13 +925,42 @@ const typeOptions = [
         class="min-w-0 space-y-6 xl:min-h-0 xl:overflow-y-auto xl:overscroll-contain xl:pb-1 xl:pr-1"
       >
 
+        <!--
+          Test-mode framing. Stated once, up front, so nothing further down has
+          to keep re-explaining why the fields are already filled in.
+        -->
+        <div
+          v-if="isTestMode"
+          class="flex items-start gap-3 rounded-xl border border-brand-200 bg-brand-50/70 p-4 dark:border-brand-900 dark:bg-brand-950/30"
+        >
+          <span class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-brand-100 text-brand-700 dark:bg-brand-900/60 dark:text-brand-300">
+            <FlaskConical class="size-4" />
+          </span>
+          <div class="min-w-0 text-sm">
+            <p class="font-semibold text-surface-900 dark:text-surface-100">You're creating a test job</p>
+            <p class="mt-1 leading-relaxed text-surface-600 dark:text-surface-300">
+              Every step is filled in with an example role — change anything you like, or just keep clicking through.
+              It stays inside your workspace: never on the public job board, your career page, or any job board.
+              When you publish, sample applicants land in it so you can see the ranking.
+            </p>
+          </div>
+        </div>
+
         <div class="rounded-xl border border-surface-200 dark:border-surface-800 bg-white dark:bg-surface-900 shadow-sm overflow-hidden">
-          <form @submit.prevent="() => handleSubmit()" class="p-5 md:p-6">
+          <form
+            @submit.prevent="() => handleSubmit()"
+            class="p-5 md:p-6"
+            :class="isRevealing ? 'sample-reveal' : ''"
+          >
             <!-- Step 1: Job details -->
             <section v-if="currentStep === 1" class="space-y-6">
               <div>
                 <h2 class="text-lg font-semibold text-surface-900 dark:text-surface-100">Job details</h2>
-                <p class="text-sm text-surface-500 dark:text-surface-400 mt-1">Only the job title is required — everything else can be added later.</p>
+                <p class="text-sm text-surface-500 dark:text-surface-400 mt-1">
+                  Title, location and description are what job boards need to accept this role. Everything else is optional — and you can
+                  <button type="button" class="font-medium underline underline-offset-2 hover:text-surface-700 dark:hover:text-surface-200" @click="handleSubmit('draft')">save an incomplete draft</button>
+                  at any point.
+                </p>
               </div>
 
               <!-- Title -->
@@ -744,21 +981,50 @@ const typeOptions = [
                 <p v-if="errors.title" class="mt-1.5 text-xs text-danger-600 dark:text-danger-400 font-medium">{{ errors.title }}</p>
               </div>
 
-              <!-- Location + employment type -->
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
-                <div>
+              <!-- Location + postal code -->
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+                <!-- Takes the whole row until a place is picked, so the empty
+                     third does not read as a field the recruiter skipped. -->
+                <div :class="form.locationCountry ? 'md:col-span-2' : 'md:col-span-3'">
                   <label for="location" class="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
-                    Location
+                    Location <span class="text-danger-500">*</span>
+                  </label>
+                  <LocationCombobox
+                    id="location"
+                    v-model="locationSelection"
+                    :invalid="!!errors.locationCountry"
+                  />
+                  <p v-if="errors.locationCountry" class="mt-1.5 text-xs text-danger-600 dark:text-danger-400 font-medium">
+                    {{ errors.locationCountry }}
+                  </p>
+                  <p v-else class="mt-1.5 text-xs text-surface-500">Boards place listings by country. For a role with no base, set Workplace to Remote instead.</p>
+                </div>
+                <!-- Only once a place is picked: a postal code with no country
+                     is unplaceable, and the field would just be noise. -->
+                <div v-if="form.locationCountry">
+                  <label for="location-postal-code" class="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
+                    Postal code <span class="font-normal text-surface-400">(optional)</span>
                   </label>
                   <input
-                    id="location"
-                    v-model="form.location"
+                    id="location-postal-code"
+                    v-model="form.locationPostalCode"
                     type="text"
-                    maxlength="500"
-                    placeholder="e.g. New York, NY"
-                    class="w-full rounded-lg border px-3 py-2.5 text-sm text-surface-900 dark:text-surface-100 bg-white dark:bg-surface-900 placeholder:text-surface-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-colors border-surface-300 dark:border-surface-700"
+                    :maxlength="POSTAL_CODE_MAX_LENGTH"
+                    autocomplete="postal-code"
+                    placeholder="e.g. 0150"
+                    class="w-full rounded-lg border px-3 py-2.5 text-sm text-surface-900 dark:text-surface-100 bg-white dark:bg-surface-900 placeholder:text-surface-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-colors"
+                    :class="errors.locationPostalCode ? 'border-danger-300 ring-1 ring-danger-100' : 'border-surface-300 dark:border-surface-700'"
+                    @blur="validateStep1"
                   />
+                  <p v-if="errors.locationPostalCode" class="mt-1.5 text-xs text-danger-600 dark:text-danger-400 font-medium">
+                    {{ errors.locationPostalCode }}
+                  </p>
+                  <p v-else class="mt-1.5 text-xs text-surface-500">Puts the role in local "jobs near me" searches.</p>
                 </div>
+              </div>
+
+              <!-- Employment type + experience + remote -->
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
                 <div>
                   <label for="type" class="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
                     Employment type
@@ -773,10 +1039,6 @@ const typeOptions = [
                     </option>
                   </select>
                 </div>
-              </div>
-
-              <!-- Experience + remote -->
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <div>
                   <label for="experienceLevel" class="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">Experience level</label>
                   <select
@@ -808,16 +1070,26 @@ const typeOptions = [
               <!-- Description -->
               <div>
                 <label for="description" class="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
-                  Description
+                  Description <span class="text-danger-500">*</span>
                 </label>
                 <textarea
                   id="description"
                   v-model="form.description"
                   rows="8"
                   placeholder="Describe the role, responsibilities, and requirements…"
-                  class="w-full rounded-lg border px-4 py-3 text-sm text-surface-900 dark:text-surface-100 bg-white dark:bg-surface-900 placeholder:text-surface-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-colors border-surface-300 dark:border-surface-700"
+                  class="w-full rounded-lg border px-4 py-3 text-sm text-surface-900 dark:text-surface-100 bg-white dark:bg-surface-900 placeholder:text-surface-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-colors"
+                  :class="errors.description ? 'border-danger-300 ring-1 ring-danger-100' : 'border-surface-300 dark:border-surface-700'"
                 />
-                <p class="mt-1.5 text-xs text-surface-500">A clear description improves AI scoring and attracts better candidates.</p>
+                <div class="mt-1.5 flex items-start justify-between gap-3">
+                  <p v-if="errors.description" class="text-xs text-danger-600 dark:text-danger-400 font-medium">{{ errors.description }}</p>
+                  <p v-else class="text-xs text-surface-500">A clear description improves AI scoring and attracts better candidates.</p>
+                  <span
+                    class="shrink-0 text-xs tabular-nums"
+                    :class="descriptionChars < MIN_DESCRIPTION_CHARS ? 'text-surface-400 dark:text-surface-500' : 'text-success-600 dark:text-success-400'"
+                  >
+                    {{ Math.min(descriptionChars, MIN_DESCRIPTION_CHARS) }} / {{ MIN_DESCRIPTION_CHARS }}
+                  </span>
+                </div>
               </div>
             </section>
 
@@ -1299,6 +1571,33 @@ const typeOptions = [
                 </div>
               </div>
 
+              <!--
+                Test mode has no publish-or-draft decision to make: the role is
+                not going anywhere public either way, so offering the choice
+                would only be a question with no consequence. The one button
+                leads where the walkthrough was always heading.
+              -->
+              <div v-else-if="isTestMode">
+                <h2 class="text-lg font-semibold text-surface-900 dark:text-surface-100 mb-2 pb-2 border-b border-surface-100 dark:border-surface-800">Ready to see it work?</h2>
+                <p class="text-sm text-surface-500 dark:text-surface-400 mb-6">
+                  Your test job opens inside your workspace, and a handful of sample applicants apply to it straight away — already scored against the criteria you just set. A knockout rule on the first question rejects the ones with under a year of experience before they are scored. Nothing is published anywhere public.
+                </p>
+
+                <button
+                  type="submit"
+                  :disabled="isSubmitting || isPopulatingSample"
+                  class="flex w-full items-center justify-center gap-2 rounded-lg bg-brand-600 px-4 py-3.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:opacity-60"
+                >
+                  <Loader2 v-if="isSubmitting || isPopulatingSample" class="size-4 animate-spin" />
+                  <Sparkles v-else class="size-4" />
+                  {{ isPopulatingSample ? 'Bringing in applicants…' : isSubmitting ? 'Creating your test job…' : 'Create test job and see applicants' }}
+                </button>
+
+                <p class="mt-3 text-center text-xs text-surface-400 dark:text-surface-500">
+                  You can delete this job and its sample applicants at any time.
+                </p>
+              </div>
+
               <!-- Pre-publish state: choose publish or draft -->
               <div v-else>
                 <h2 class="text-lg font-semibold text-surface-900 dark:text-surface-100 mb-2 pb-2 border-b border-surface-100 dark:border-surface-800">Ready to go?</h2>
@@ -1360,6 +1659,49 @@ const typeOptions = [
                   </button>
                 </div>
 
+                <!-- Syndication is opt-out, not automatic. Placed with the
+                     publish decision because that is the moment it takes
+                     effect, and because a role sent to the aggregators cannot
+                     be recalled from them on the same day it goes out. -->
+                <label
+                  v-if="publishChoice === 'publish'"
+                  class="mb-8 flex cursor-pointer items-start gap-3 rounded-xl border border-surface-200 dark:border-surface-800 bg-surface-50 dark:bg-surface-900/50 p-5"
+                >
+                  <input
+                    v-model="distributeToBoards"
+                    type="checkbox"
+                    class="mt-0.5 size-4 shrink-0 rounded border-surface-300 dark:border-surface-600 text-brand-600 focus:ring-brand-500"
+                  />
+                  <div>
+                    <span class="flex items-center gap-1.5 text-sm font-medium text-surface-900 dark:text-surface-100">
+                      <Globe2 class="size-3.5 text-surface-400" />
+                      Also list on external job boards
+                    </span>
+                    <p class="mt-1 text-xs leading-relaxed text-surface-500 dark:text-surface-400">
+                      Free syndication to Jooble, Adzuna, Careerjet, Talent.com and others.
+                      Turn it off for a confidential or internal-only search — the role still
+                      gets its application link and its place on your career page.
+                    </p>
+                  </div>
+                </label>
+
+                <!-- Publishing while these are unmet would put the role live but
+                     invisible on every job board. Say so here rather than
+                     bouncing the user back to step 1 on submit. -->
+                <div
+                  v-if="publishChoice === 'publish' && publishBlockers.length"
+                  class="flex items-start gap-2.5 rounded-xl border border-warning-200 dark:border-warning-900 bg-warning-50 dark:bg-warning-950/30 p-4"
+                >
+                  <Globe2 class="size-4 shrink-0 mt-0.5 text-warning-600 dark:text-warning-400" />
+                  <div class="text-xs leading-relaxed text-warning-800 dark:text-warning-300">
+                    <p>This role isn't ready for job boards yet:</p>
+                    <ul class="mt-1.5 list-disc space-y-1 pl-4">
+                      <li v-for="blocker in publishBlockers" :key="blocker.code">{{ blocker.reason }}</li>
+                    </ul>
+                    <button type="button" class="mt-2 font-semibold underline" @click="goToStep(1)">Fix in Job details</button>
+                  </div>
+                </div>
+
                 <!-- Summary of what was configured -->
                 <div class="rounded-xl border border-surface-200 dark:border-surface-800 bg-surface-50 dark:bg-surface-900/50 p-5">
                   <h3 class="text-sm font-semibold text-surface-700 dark:text-surface-300 mb-4">Job summary</h3>
@@ -1370,11 +1712,11 @@ const typeOptions = [
                       </dt>
                       <dd class="text-surface-900 dark:text-surface-100 font-medium">{{ form.title }}</dd>
                     </div>
-                    <div v-if="form.location" class="flex items-start gap-3">
+                    <div v-if="locationDisplay" class="flex items-start gap-3">
                       <dt class="flex items-center gap-1.5 text-surface-500 dark:text-surface-400 shrink-0 w-32">
                         <Link2 class="size-3.5" /> Location
                       </dt>
-                      <dd class="text-surface-900 dark:text-surface-100">{{ form.location }}</dd>
+                      <dd class="text-surface-900 dark:text-surface-100">{{ locationDisplay }}</dd>
                     </div>
                     <div class="flex items-start gap-3">
                       <dt class="flex items-center gap-1.5 text-surface-500 dark:text-surface-400 shrink-0 w-32">
@@ -1459,7 +1801,7 @@ const typeOptions = [
       >
         <ApplicationBuilderPreview
           :application-form="applicationForm"
-          :job-details="form"
+          :job-details="previewJobDetails"
           max-height="100%"
         />
       </aside>
@@ -1479,5 +1821,32 @@ const typeOptions = [
 <style scoped>
 button:not(:disabled) {
   cursor: pointer;
+}
+
+/*
+ * Test mode only: each step's pre-filled content settles in rather than
+ * snapping, so the wizard reads as filling itself in for you. Opacity and a
+ * small offset only — nothing here moves layout or blocks input, so the fields
+ * stay usable for the whole 420ms.
+ */
+.sample-reveal :deep(section) {
+  animation: sample-reveal 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes sample-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sample-reveal :deep(section) {
+    animation: none;
+  }
 }
 </style>

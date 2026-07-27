@@ -14,8 +14,15 @@ import { test, expect, getPublishedApplicationLink } from '../fixtures'
  */
 
 const JOB_TITLE = 'Senior QA Engineer'
-const JOB_DESCRIPTION = 'We are looking for a senior QA engineer to lead our testing efforts.'
-const JOB_LOCATION = 'Remote'
+// Job boards reject thin listings, so the wizard requires a real description
+// before a role can leave step 1 — this one clears that floor.
+const JOB_DESCRIPTION = 'We are looking for a senior QA engineer to lead our testing efforts. '
+  + 'You will own our end-to-end suite, partner with engineers on release quality, and set the standard for how we test. '
+  + 'Experience with Playwright and CI pipelines is a strong plus.'
+// The location field is a constrained picker — typing alone commits nothing, so
+// the test has to select a real place from the results the same way a user does.
+const JOB_LOCATION_QUERY = 'Oslo'
+const JOB_LOCATION = 'Oslo, Norway'
 const QUESTION_LABEL = 'Which testing framework do you know best?'
 const UPDATED_QUESTION_LABEL = 'Which browser testing framework do you know best?'
 
@@ -42,6 +49,17 @@ test.describe('Job Creation Flow', () => {
 
     await title.fill('Robustness Test Engineer')
     const continueButton = page.locator('form').getByRole('button', { name: 'Save & continue' })
+
+    // A title alone is enough for a draft, but not to leave Job details: a role
+    // published without a location or with a stub description is one the job
+    // boards drop, so the wizard asks for both up front.
+    await expect(continueButton).toBeDisabled()
+    await page.getByLabel('Description').fill(JOB_DESCRIPTION)
+    await expect(continueButton).toBeDisabled()
+    const draftLocationInput = page.getByRole('combobox', { name: 'Location' })
+    await draftLocationInput.fill(JOB_LOCATION_QUERY)
+    await page.getByRole('option', { name: JOB_LOCATION }).click()
+
     await expect(continueButton).toBeEnabled()
     await continueButton.click()
 
@@ -90,7 +108,10 @@ test.describe('Job Creation Flow', () => {
     await page.getByLabel('Job title').waitFor({ state: 'visible', timeout: 15_000 })
     await page.getByLabel('Job title').fill(JOB_TITLE)
     await page.getByLabel('Description').fill(JOB_DESCRIPTION)
-    await page.getByLabel('Location').fill(JOB_LOCATION)
+    const locationInput = page.getByRole('combobox', { name: 'Location' })
+    await locationInput.fill(JOB_LOCATION_QUERY)
+    await page.getByRole('option', { name: JOB_LOCATION }).click()
+    await expect(locationInput).toHaveValue(JOB_LOCATION)
 
     // The persistent candidate preview should update as job details are entered.
     const preview = page.getByRole('complementary')

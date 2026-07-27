@@ -76,6 +76,31 @@ export interface SendEmailResult {
 }
 
 /**
+ * Domains reserved by RFC 2606 / RFC 6761 that can never accept mail.
+ *
+ * The sample applicants behind "Create a test job" live at @example.com, and a
+ * recruiter trying the product out will quite reasonably invite one of them to
+ * an interview. Nothing about that is a mistake — but actually attempting the
+ * send would post a message guaranteed to hard bounce, and hard bounces are
+ * scored against the *sending domain*, so every fictional invitation would cost
+ * a little deliverability for the real candidate emails that matter.
+ *
+ * Blocked at the transport rather than in the interview flow so it also covers
+ * every other path that might mail a candidate, including ones added later.
+ * These domains are reserved precisely so they can never belong to a real user,
+ * so this can never swallow a message someone was waiting for.
+ */
+const UNDELIVERABLE_DOMAINS = ['example.com', 'example.org', 'example.net', 'localhost']
+const UNDELIVERABLE_TLDS = ['.test', '.invalid', '.localhost', '.example']
+
+export function isUndeliverableAddress(address: string): boolean {
+  const domain = address.trim().toLowerCase().split('@').pop() ?? ''
+  if (!domain) return false
+  return UNDELIVERABLE_DOMAINS.includes(domain)
+    || UNDELIVERABLE_TLDS.some(tld => domain.endsWith(tld))
+}
+
+/**
  * Route an outbound email through SMTP (preferred) → Resend → console fallback.
  * Priority: SMTP_HOST set → use SMTP. Else RESEND_API_KEY set → use Resend.
  * Otherwise logs the fallback message and returns (no error thrown).
@@ -84,6 +109,14 @@ export interface SendEmailResult {
  */
 async function sendEmail(msg: EmailMessage): Promise<SendEmailResult> {
   const from = getFromEmail()
+
+  // Treated as a successful no-op rather than an error: the caller is doing
+  // something legitimate, and failing their interview invitation would make
+  // the walkthrough look broken.
+  if (isUndeliverableAddress(msg.to)) {
+    console.info(`[Reqcore] Skipped send to reserved address ${msg.to} — ${msg.subject}`)
+    return { providerMessageId: null }
+  }
 
   // 1. SMTP — takes priority when SMTP_HOST is configured
   const smtp = getSmtpTransporter()

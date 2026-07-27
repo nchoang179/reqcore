@@ -1,4 +1,5 @@
 import { job, jobQuestion, scoringCriterion } from '../../database/schema'
+import { formatJobLocation } from '../../../shared/job-location'
 import { createJobWizardSchema } from '../../utils/schemas/job'
 
 export default defineEventHandler(async (event) => {
@@ -7,10 +8,24 @@ export default defineEventHandler(async (event) => {
 
   const body = await readValidatedBody(event, createJobWizardSchema.parse)
 
-  // Opening a role counts against the plan's active-role limit.
-  if (body.status === 'open') {
+  // Opening a role counts against the plan's active-role limit, and puts it in
+  // front of the job boards — so it has to be complete enough for them.
+  //
+  // Neither applies to a test role. It never reaches a board, so the feed's
+  // completeness rules are meaningless for it, and charging it against the
+  // active-role cap would mean a free workspace spends its only slot on the
+  // walkthrough — turning "try it out" into a paywall.
+  if (body.status === 'open' && !body.isTest) {
     await assertActiveRoleLimit(orgId)
+    assertPublishable(body)
   }
+
+  // The display string is always derived from the structured parts, so a direct
+  // API caller cannot desync the two. Anything they sent as `location` is only
+  // kept when there is nothing structured to derive from.
+  const location = body.locationCountry
+    ? formatJobLocation({ city: body.locationCity, region: body.locationRegion, country: body.locationCountry })
+    : body.location
 
   // Generate a deterministic ID upfront so we can build the slug
   const jobId = crypto.randomUUID()
@@ -23,7 +38,7 @@ export default defineEventHandler(async (event) => {
       title: body.title,
       slug,
       description: body.description,
-      location: body.location,
+      location,
       type: body.type,
       status: body.status,
       salaryMin: body.salaryMin,
@@ -41,8 +56,12 @@ export default defineEventHandler(async (event) => {
       locationCity: body.locationCity,
       locationRegion: body.locationRegion,
       locationCountry: body.locationCountry,
+      // Dropped without a country: a bare postal code is unplaceable, and
+      // sending one to a board only mis-pins the listing.
+      locationPostalCode: body.locationCountry ? body.locationPostalCode : null,
       department: body.department,
       distributeToBoards: body.distributeToBoards,
+      isTest: body.isTest,
       // Created straight into `open` — this is the moment it goes public.
       publishedAt: body.status === 'open' ? new Date() : null,
     }).returning({
@@ -68,6 +87,7 @@ export default defineEventHandler(async (event) => {
       locationCity: job.locationCity,
       locationRegion: job.locationRegion,
       locationCountry: job.locationCountry,
+      locationPostalCode: job.locationPostalCode,
       department: job.department,
       distributeToBoards: job.distributeToBoards,
       publishedAt: job.publishedAt,

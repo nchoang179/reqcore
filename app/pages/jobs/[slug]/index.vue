@@ -80,8 +80,11 @@ useSeoMeta({
   // API but renders a "not found" body with a 200 status, so opt it out of
   // indexing to avoid a soft 404 and drop the expired posting from Google for
   // Jobs — or (b) this is a localized variant (see `isLocalizedVariant`).
+  // — or (c) this is a test role. It stays reachable so whoever created it can
+  // walk their own apply flow, but it describes a job nobody is hiring for, so
+  // it must never enter a search index.
   robots: () =>
-    fetchError.value || isLocalizedVariant.value
+    fetchError.value || isLocalizedVariant.value || job.value?.isTest
       ? 'noindex, nofollow'
       : 'index, follow',
 })
@@ -109,6 +112,10 @@ function mapEmploymentType(type: string): string {
 // resolves and is serialized into the rendered head.
 const jobPostingJsonLd = computed(() => {
   if (!job.value) return null
+  // Google for Jobs treats JobPosting markup as a claim that a real vacancy
+  // exists. A test role would be a false one, and structured-data violations
+  // are judged per-domain.
+  if (job.value.isTest) return null
 
   const j = job.value
   const posting: Record<string, unknown> = {
@@ -164,6 +171,7 @@ const jobPostingJsonLd = computed(() => {
     if (j.locationCity) address.addressLocality = j.locationCity
     if (j.locationRegion) address.addressRegion = j.locationRegion
     if (j.locationCountry) address.addressCountry = j.locationCountry
+    if (j.locationPostalCode) address.postalCode = j.locationPostalCode
     if (!j.locationCity && !j.locationRegion && j.location) {
       address.addressLocality = j.location
     }

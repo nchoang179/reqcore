@@ -106,6 +106,17 @@ export const job = pgTable('job', {
   locationRegion: text('location_region'),
   /** ISO 3166-1 alpha-2, uppercased. Required to appear in the job board feed. */
   locationCountry: text('location_country'),
+  /**
+   * Optional postal code, uppercased and whitespace-collapsed.
+   *
+   * Aggregators geocode a city name to its centroid, which places every role in
+   * a large metro at the same pin — wrong by enough to fall out of the radius
+   * searches ("within 10 miles") candidates actually filter by. A postal code
+   * narrows that. It stays out of the derived `location` display string on
+   * purpose: putting it there would split the career page's location filter
+   * into one group per postal code.
+   */
+  locationPostalCode: text('location_postal_code'),
   /** Maps to <category> in the feed. */
   department: text('department'),
   // ── Distribution ──
@@ -115,6 +126,21 @@ export const job = pgTable('job', {
    * confidential search out per job.
    */
   distributeToBoards: boolean('distribute_to_boards').notNull().default(true),
+  /**
+   * A role created to try the product out rather than to hire for.
+   *
+   * It behaves like any other job inside the workspace — it opens, collects
+   * applications and gets scored — but it is excluded from every surface a real
+   * candidate or an aggregator can reach: the public board, career pages, the
+   * sitemap and /jobs.xml. That is the whole point: someone evaluating Reqcore
+   * can walk the real create-a-job flow without their practice run turning into
+   * a listing the world sees, which is what fills the board with "test" and
+   * "asdf" roles today.
+   *
+   * Never inferred. Only the sample-job entry point sets it, so a real role can
+   * never be quietly demoted out of distribution.
+   */
+  isTest: boolean('is_test').notNull().default(false),
   /**
    * First time this job went `open`. Feeds and Google for Jobs rank on posting
    * age, so `createdAt` misreports a draft that sat unpublished for weeks. Set

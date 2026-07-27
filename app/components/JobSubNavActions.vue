@@ -50,6 +50,18 @@ async function handleJobTransition(newStatus: string) {
     await refreshJob()
   } catch (err: any) {
     if (handlePreviewReadOnlyError(err)) return
+    // The publish guard blocks roles the job boards would reject. It names the
+    // field at fault, so point at the form that fixes it instead of dead-ending.
+    if (err.data?.data?.field) {
+      toast.add({
+        type: 'warning',
+        title: 'Not ready to publish',
+        message: err.data.statusMessage,
+        link: { label: 'Open job settings', href: localePath(`/dashboard/jobs/${props.jobId}/settings`) },
+        duration: 10000,
+      })
+      return
+    }
     toast.error('Failed to update status', { message: err.data?.statusMessage, statusCode: err.data?.statusCode })
   } finally {
     isJobTransitioning.value = false

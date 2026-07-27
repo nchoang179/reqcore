@@ -121,12 +121,14 @@ export default defineEventHandler(async (event) => {
       description: job.description,
       type: job.type,
       status: job.status,
+      isTest: job.isTest,
       department: job.department,
       experienceLevel: job.experienceLevel,
       location: job.location,
       locationCity: job.locationCity,
       locationRegion: job.locationRegion,
       locationCountry: job.locationCountry,
+      locationPostalCode: job.locationPostalCode,
       remoteStatus: job.remoteStatus,
       salaryMin: job.salaryMin,
       salaryMax: job.salaryMax,
@@ -147,6 +149,7 @@ export default defineEventHandler(async (event) => {
     .leftJoin(orgSettings, eq(orgSettings.organizationId, job.organizationId))
     .where(and(
       eq(job.status, 'open'),
+      eq(job.isTest, false),
       eq(job.distributeToBoards, true),
     ))
     .orderBy(desc(job.publishedAt))
@@ -184,6 +187,9 @@ export default defineEventHandler(async (event) => {
       + tag('city', city)
       + tag('state', row.locationRegion)
       + tag('country', row.locationCountry)
+      // Lets a board geocode to the postal district instead of the city
+      // centroid, which is what radius search ("within 10 miles") ranks on.
+      + tag('postalcode', row.locationPostalCode)
       + tag('jobtype', JOB_TYPE_LABELS[row.type] ?? 'fulltime')
       + tag('category', row.department)
       + tag('experience', row.experienceLevel ? EXPERIENCE_LABELS[row.experienceLevel] : null)

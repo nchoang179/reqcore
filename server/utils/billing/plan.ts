@@ -64,11 +64,14 @@ export async function resolveOrgPlanId(orgId: string): Promise<BillingTier> {
 }
 
 /** Count an org's currently-open roles (jobs with status 'open'). */
+// Test roles are excluded: they exist so someone can try the product, and
+// billing them against the cap would make the walkthrough consume a free
+// workspace's only slot.
 async function countOpenJobs(orgId: string): Promise<number> {
   const [row] = await db
     .select({ total: sql<string>`count(*)` })
     .from(job)
-    .where(and(eq(job.organizationId, orgId), eq(job.status, 'open')))
+    .where(and(eq(job.organizationId, orgId), eq(job.status, 'open'), eq(job.isTest, false)))
   return Number(row?.total ?? 0)
 }
 

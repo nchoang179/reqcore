@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createJobSchema, createJobWizardSchema } from '../../server/utils/schemas/job'
+import { countryCodeSchema, createJobSchema, createJobWizardSchema, postalCodeSchema } from '../../server/utils/schemas/job'
 import { createQuestionSchema, questionStateSchema } from '../../server/utils/schemas/jobQuestion'
 
 describe('job creation validation', () => {
@@ -15,6 +15,36 @@ describe('job creation validation', () => {
     expect(result.title).toBe('Senior QA Engineer')
     expect(result.description).toBe('Build reliable systems.')
     expect(result.location).toBe('Remote')
+  })
+
+  it('normalizes country codes so the feed matches on one spelling', () => {
+    expect(countryCodeSchema.parse(' no ')).toBe('NO')
+    expect(countryCodeSchema.parse('No')).toBe('NO')
+
+    expect(countryCodeSchema.safeParse('NOR').success).toBe(false)
+    expect(countryCodeSchema.safeParse('N').success).toBe(false)
+    expect(countryCodeSchema.safeParse('N1').success).toBe(false)
+  })
+
+  it('accepts structured location parts on create', () => {
+    const result = createJobSchema.parse({
+      title: 'Senior QA Engineer',
+      locationCity: '  Oslo  ',
+      locationRegion: null,
+      locationCountry: 'no',
+    })
+
+    expect(result.locationCity).toBe('Oslo')
+    expect(result.locationCountry).toBe('NO')
+  })
+
+  it('normalizes a postal code and refuses a street address in its place', () => {
+    expect(postalCodeSchema.parse(' sw1a  1aa ')).toBe('SW1A 1AA')
+    // A cleared input arrives as '' and has to mean NULL, not a validation error.
+    expect(postalCodeSchema.parse('')).toBeNull()
+
+    expect(postalCodeSchema.safeParse('Storgata 1, 0155 Oslo').success).toBe(false)
+    expect(postalCodeSchema.safeParse('0123456789012').success).toBe(false)
   })
 
   it('rejects duplicate select options after trimming and case folding', () => {

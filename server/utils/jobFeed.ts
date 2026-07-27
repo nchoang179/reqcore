@@ -1,4 +1,6 @@
-import { markdownToPlainText } from '../../shared/job-description'
+import { createError } from 'h3'
+import { missingPublishRequirements } from '../../shared/job-publish'
+import type { PublishRequirementInput } from '../../shared/job-publish'
 
 /**
  * Eligibility rules for the platform-wide job board feed (`/jobs.xml`).
@@ -41,17 +43,12 @@ export function isFeedBoard(value: string): value is FeedBoard {
   return (FEED_BOARDS as readonly string[]).includes(value)
 }
 
-/**
- * Boards reject thin listings. This floor is low enough that a genuinely short
- * real posting passes and high enough to exclude a title typed into the body.
- */
-const MIN_DESCRIPTION_CHARS = 200
-
 /** Emitted as <date>/validThrough when a job has no explicit expiry. */
 export const DEFAULT_FEED_VALIDITY_DAYS = 60
 
 export type FeedIneligibilityCode =
   | 'not_open'
+  | 'test_job'
   | 'opted_out'
   | 'expired'
   | 'missing_country'
@@ -69,6 +66,7 @@ export interface FeedIneligibility {
 
 export interface FeedJobInput {
   status: string
+  isTest: boolean
   distributeToBoards: boolean
   description: string | null
   locationCountry: string | null
@@ -79,6 +77,27 @@ export interface FeedJobInput {
 export interface FeedOrgInput {
   isDemo: boolean
   ownerEmailVerified: boolean
+}
+
+/**
+ * Refuses to publish a role the boards would reject or could not place.
+ *
+ * The feed gate alone would let a recruiter open a role and only discover in
+ * the Promote tab that it is invisible. Blocking at publish time instead means
+ * a live role is always distributable — drafts stay unrestricted, because
+ * that is where a half-filled job legitimately lives.
+ *
+ * The failing field travels in `data` so the form that submitted can attach the
+ * message to the input that fixes it.
+ */
+export function assertPublishable(job: PublishRequirementInput, now?: Date): void {
+  const [unmet] = missingPublishRequirements(job, now)
+  if (!unmet) return
+  throw createError({
+    statusCode: 422,
+    statusMessage: unmet.reason,
+    data: { code: unmet.code, field: unmet.field },
+  })
 }
 
 /**
@@ -100,6 +119,17 @@ export function checkFeedEligibility(
     }
   }
 
+  // Ahead of the fixable reasons on purpose: a test role isn't a job that needs
+  // improving, so telling its creator to lengthen the description would be
+  // advice about a listing that is never going anywhere.
+  if (job.isTest) {
+    return {
+      code: 'test_job',
+      reason: 'This is a test role. It stays inside your workspace and is never sent to job boards.',
+      fixable: false,
+    }
+  }
+
   if (!job.distributeToBoards) {
     return {
       code: 'opted_out',
@@ -108,30 +138,11 @@ export function checkFeedEligibility(
     }
   }
 
-  if (job.validThrough && job.validThrough.getTime() <= now.getTime()) {
-    return {
-      code: 'expired',
-      reason: 'This role\'s expiry date has passed. Extend it to keep it on job boards.',
-      fixable: true,
-    }
-  }
-
-  // Fully remote roles legitimately have no country. Everything else needs one:
-  // aggregators index by location and drop or bury postings they cannot place.
-  if (!job.locationCountry && job.remoteStatus !== 'remote') {
-    return {
-      code: 'missing_country',
-      reason: 'Add a country so job boards can place this role in their search results.',
-      fixable: true,
-    }
-  }
-
-  if (markdownToPlainText(job.description).length < MIN_DESCRIPTION_CHARS) {
-    return {
-      code: 'description_too_short',
-      reason: `Job boards reject thin listings. Write at least ${MIN_DESCRIPTION_CHARS} characters of description.`,
-      fixable: true,
-    }
+  // Everything a recruiter can fix by editing the job — the same rules the
+  // publish guard enforces, so the two ends cannot drift apart.
+  const [unmet] = missingPublishRequirements(job, now)
+  if (unmet) {
+    return { code: unmet.code, reason: unmet.reason, fixable: true }
   }
 
   if (org.isDemo) {

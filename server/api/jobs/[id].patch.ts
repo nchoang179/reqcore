@@ -1,5 +1,7 @@
 import { eq, and } from 'drizzle-orm'
 import { job } from '../../database/schema'
+import { formatJobLocation } from '../../../shared/job-location'
+import { missingPublishRequirements } from '../../../shared/job-publish'
 import { idParamSchema, updateJobSchema, JOB_STATUS_TRANSITIONS } from '../../utils/schemas/job'
 
 export default defineEventHandler(async (event) => {
@@ -9,10 +11,24 @@ export default defineEventHandler(async (event) => {
   const { id } = await getValidatedRouterParams(event, idParamSchema.parse)
   const body = await readValidatedBody(event, updateJobSchema.parse)
 
-  // Fetch existing job — needed for status transition check and slug regeneration
+  // Fetch existing job — needed for the status transition check, slug
+  // regeneration, and the publish guard. The description and location columns
+  // are read because a PATCH that only flips status has to be judged against
+  // stored values.
   const existing = await db.query.job.findFirst({
     where: and(eq(job.id, id), eq(job.organizationId, orgId)),
-    columns: { status: true, title: true, slug: true, publishedAt: true },
+    columns: {
+      status: true,
+      title: true,
+      slug: true,
+      publishedAt: true,
+      description: true,
+      locationCity: true,
+      locationRegion: true,
+      locationCountry: true,
+      remoteStatus: true,
+      validThrough: true,
+    },
   })
 
   if (!existing) {
@@ -35,9 +51,62 @@ export default defineEventHandler(async (event) => {
     }
   }
 
+  // Merge the patch over stored values before judging the result: a PATCH that
+  // only sets `status: 'open'` still has to be checked against the location
+  // already on the record.
+  const merged = {
+    description: body.description === undefined ? existing.description : body.description,
+    locationCity: body.locationCity === undefined ? existing.locationCity : body.locationCity,
+    locationRegion: body.locationRegion === undefined ? existing.locationRegion : body.locationRegion,
+    locationCountry: body.locationCountry === undefined ? existing.locationCountry : body.locationCountry,
+    remoteStatus: body.remoteStatus === undefined ? existing.remoteStatus : body.remoteStatus,
+    validThrough: body.validThrough === undefined ? existing.validThrough : body.validThrough,
+  }
+
+  const touchesLocation = body.locationCity !== undefined
+    || body.locationRegion !== undefined
+    || body.locationCountry !== undefined
+    || body.locationPostalCode !== undefined
+
+  // A role going live has to meet every board requirement. One already live is
+  // only held to the ones this edit touches: roles opened before these rules
+  // existed must stay editable, but an edit may not make a live role worse.
+  if ((body.status ?? existing.status) === 'open') {
+    const isOpening = body.status === 'open' && existing.status !== 'open'
+    const changed = {
+      // Trimmed, so re-saving an untrimmed legacy description is not read as an
+      // edit and does not block a save that changed nothing.
+      description: (merged.description ?? '').trim() !== (existing.description ?? '').trim(),
+      locationCountry: merged.locationCountry !== existing.locationCountry
+        || merged.remoteStatus !== existing.remoteStatus,
+      validThrough: merged.validThrough?.getTime() !== existing.validThrough?.getTime(),
+    }
+    const blocking = missingPublishRequirements(merged)
+      .filter(requirement => isOpening || changed[requirement.field])
+
+    if (blocking[0]) {
+      throw createError({
+        statusCode: 422,
+        statusMessage: blocking[0].reason,
+        data: { code: blocking[0].code, field: blocking[0].field },
+      })
+    }
+  }
+
   // Regenerate slug when title or custom slug changes
   const updates: Record<string, unknown> = { ...body, updatedAt: new Date() }
   delete (updates as any).slug // remove raw slug from spread — we set it explicitly below
+
+  // Keep the free-text display string derived from the structured parts
+  // whenever either side is touched, so the two can never drift apart.
+  if (touchesLocation) {
+    updates.location = merged.locationCountry
+      ? formatJobLocation({ city: merged.locationCity, region: merged.locationRegion, country: merged.locationCountry })
+      : null
+    // Clearing the place clears its postal code with it — a code left behind
+    // after the country went away would be sent to boards that cannot use it.
+    if (!merged.locationCountry) updates.locationPostalCode = null
+  }
   if (body.title || body.slug) {
     updates.slug = generateJobSlug(body.title ?? existing.title, id, body.slug)
   }
@@ -76,6 +145,7 @@ export default defineEventHandler(async (event) => {
       locationCity: job.locationCity,
       locationRegion: job.locationRegion,
       locationCountry: job.locationCountry,
+      locationPostalCode: job.locationPostalCode,
       department: job.department,
       distributeToBoards: job.distributeToBoards,
       publishedAt: job.publishedAt,

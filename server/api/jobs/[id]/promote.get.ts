@@ -40,6 +40,7 @@ export default defineEventHandler(async (event) => {
       remoteStatus: true,
       validThrough: true,
       distributeToBoards: true,
+      isTest: true,
       publishedAt: true,
       createdAt: true,
     },
@@ -104,6 +105,8 @@ export default defineEventHandler(async (event) => {
       slug: found.slug,
       status: found.status,
       distributeToBoards: found.distributeToBoards,
+      /** Drives whether the syndication toggle is offered — see `test_job` below. */
+      isTest: found.isTest,
       publishedAt: found.publishedAt,
     },
     organizationName: org?.name ?? null,

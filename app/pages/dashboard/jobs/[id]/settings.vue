@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import {
-  Save, Trash2, ArrowLeft, ExternalLink, Link2, ClipboardCopy,
+  Save, Trash2, ArrowLeft, ExternalLink, Link2, ClipboardCopy, Globe2,
 } from 'lucide-vue-next'
 import { z } from 'zod'
+import type { LocationSelection } from '~/components/LocationCombobox.vue'
+import { hasPublishableLocation, isValidPostalCode, normalizePostalCode, POSTAL_CODE_MAX_LENGTH } from '~~/shared/job-location'
+import { descriptionLength, MIN_DESCRIPTION_CHARS } from '~~/shared/job-publish'
 
 definePageMeta({
   layout: 'dashboard',
@@ -31,7 +34,11 @@ useSeoMeta({
 const form = ref({
   title: '',
   description: '',
-  location: '',
+  // Structured location — `job.location` is derived from these server-side.
+  locationCity: null as string | null,
+  locationRegion: null as string | null,
+  locationCountry: null as string | null,
+  locationPostalCode: null as string | null,
   type: 'full_time' as string,
   slug: '',
   salaryMin: null as number | null,
@@ -52,7 +59,10 @@ watch(job, (j) => {
     form.value = {
       title: j.title ?? '',
       description: j.description ?? '',
-      location: j.location ?? '',
+      locationCity: j.locationCity ?? null,
+      locationRegion: j.locationRegion ?? null,
+      locationCountry: j.locationCountry ?? null,
+      locationPostalCode: j.locationPostalCode ?? null,
       type: j.type ?? 'full_time',
       slug: j.slug ?? '',
       salaryMin: j.salaryMin ?? null,
@@ -69,6 +79,39 @@ watch(job, (j) => {
     }
   }
 }, { immediate: true })
+
+/** Adapter between the three flat form fields and the picker's single value. */
+const locationSelection = computed<LocationSelection | null>({
+  get: () => form.value.locationCountry
+    ? { city: form.value.locationCity, region: form.value.locationRegion, country: form.value.locationCountry }
+    : null,
+  set: (value) => {
+    form.value.locationCity = value?.city ?? null
+    form.value.locationRegion = value?.region ?? null
+    form.value.locationCountry = value?.country ?? null
+    // The code belonged to the place that was just replaced — keeping it would
+    // pin the role to a postal district in the wrong city.
+    form.value.locationPostalCode = null
+  },
+})
+
+/**
+ * Roles created before the location picker existed carry only a free-text
+ * string, which job boards cannot place — this is where the Promote tab's
+ * "Fix in job settings" link lands, so the prompt has to be here.
+ */
+const needsLocation = computed(() => !hasPublishableLocation({
+  locationCountry: form.value.locationCountry,
+  remoteStatus: form.value.remoteStatus || null,
+}))
+
+/**
+ * Same story for the description: boards reject thin listings, and the publish
+ * guard refuses a role that would be rejected — so show the shortfall here,
+ * where it gets fixed, rather than only at the moment publishing fails.
+ */
+const descriptionChars = computed(() => descriptionLength(form.value.description))
+const needsDescription = computed(() => descriptionChars.value < MIN_DESCRIPTION_CHARS)
 
 // When "Negotiable" is toggled on, clear the salary range fields
 watch(() => form.value.salaryNegotiable, (negotiable) => {
@@ -87,7 +130,13 @@ watch(() => form.value.salaryNegotiable, (negotiable) => {
 const editSchema = z.object({
   title: z.string().min(1, 'Title is required').max(200),
   description: z.string().optional(),
-  location: z.string().optional(),
+  locationCity: z.string().max(120).nullable(),
+  locationRegion: z.string().max(120).nullable(),
+  locationCountry: z.string().length(2).nullable(),
+  locationPostalCode: z.string().trim()
+    .max(POSTAL_CODE_MAX_LENGTH, `Postal code must be ${POSTAL_CODE_MAX_LENGTH} characters or less`)
+    .refine(value => !value || isValidPostalCode(value), 'Enter a postal code, not a street address')
+    .nullable(),
   type: z.enum(['full_time', 'part_time', 'contract', 'internship']),
   slug: z.string().max(80).optional(),
   salaryMin: z.union([z.coerce.number().int().min(0), z.null()]).optional(),
@@ -124,7 +173,12 @@ async function handleSave() {
     const payload: Record<string, unknown> = {
       title: form.value.title,
       description: form.value.description || null,
-      location: form.value.location || null,
+      // Always sent, so clearing the picker writes NULL and the derived
+      // display string is recomputed server-side.
+      locationCity: form.value.locationCity,
+      locationRegion: form.value.locationRegion,
+      locationCountry: form.value.locationCountry,
+      locationPostalCode: normalizePostalCode(form.value.locationPostalCode),
       type: form.value.type,
       slug: form.value.slug || undefined,
       requireResume: form.value.requireResume,
@@ -299,23 +353,61 @@ function onSalaryMaxChange(e: Event) {
                 v-model="form.description"
                 rows="6"
                 placeholder="Describe the role, responsibilities, and requirements…"
-                class="w-full rounded-lg border border-surface-300 dark:border-surface-700 px-3 py-2 text-sm text-surface-900 dark:text-surface-100 bg-white dark:bg-surface-800 placeholder:text-surface-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-colors"
+                class="w-full rounded-lg border px-3 py-2 text-sm text-surface-900 dark:text-surface-100 bg-white dark:bg-surface-800 placeholder:text-surface-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-colors"
+                :class="needsDescription ? 'border-warning-300 dark:border-warning-800' : 'border-surface-300 dark:border-surface-700'"
               />
+              <p v-if="needsDescription" class="mt-1 text-xs text-warning-700 dark:text-warning-400">
+                Job boards reject thin listings — write at least {{ MIN_DESCRIPTION_CHARS }} characters
+                ({{ descriptionChars }} so far) for this role to be published and syndicated.
+              </p>
             </div>
 
-            <!-- Location + Type row -->
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
+            <!-- Roles from before the location picker have only free text,
+                 which no job board can place. -->
+            <div
+              v-if="needsLocation"
+              class="flex items-start gap-2.5 rounded-lg border border-warning-200 dark:border-warning-900 bg-warning-50 dark:bg-warning-950/30 p-3"
+            >
+              <Globe2 class="size-4 shrink-0 mt-0.5 text-warning-600 dark:text-warning-400" />
+              <p class="text-xs leading-relaxed text-warning-800 dark:text-warning-300">
+                Add a country so job boards can place this role in their search results. Pick a location below, or set Work Arrangement to Remote.
+              </p>
+            </div>
+
+            <!-- Location + postal code + Type row -->
+            <div class="grid grid-cols-1 sm:grid-cols-4 gap-4">
+              <!-- Absorbs the postal code's column until a place is picked, so
+                   the row has no empty slot to explain. -->
+              <div :class="form.locationCountry ? 'sm:col-span-2' : 'sm:col-span-3'">
                 <label for="settings-location" class="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">
                   Location
                 </label>
-                <input
+                <LocationCombobox
                   id="settings-location"
-                  v-model="form.location"
-                  type="text"
-                  placeholder="e.g. Oslo, Norway"
-                  class="w-full rounded-lg border border-surface-300 dark:border-surface-700 px-3 py-2 text-sm text-surface-900 dark:text-surface-100 bg-white dark:bg-surface-800 placeholder:text-surface-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-colors"
+                  v-model="locationSelection"
+                  :invalid="needsLocation"
                 />
+              </div>
+              <!-- Only once a place is picked: a postal code with no country
+                   is unplaceable, and the field would just be noise. -->
+              <div v-if="form.locationCountry">
+                <label for="settings-postal-code" class="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">
+                  Postal code <span class="font-normal text-surface-400">(optional)</span>
+                </label>
+                <input
+                  id="settings-postal-code"
+                  v-model="form.locationPostalCode"
+                  type="text"
+                  :maxlength="POSTAL_CODE_MAX_LENGTH"
+                  autocomplete="postal-code"
+                  placeholder="e.g. 0150"
+                  class="w-full rounded-lg border px-3 py-2 text-sm text-surface-900 dark:text-surface-100 bg-white dark:bg-surface-800 placeholder:text-surface-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-colors"
+                  :class="errors.locationPostalCode ? 'border-danger-300 ring-1 ring-danger-100' : 'border-surface-300 dark:border-surface-700'"
+                />
+                <p v-if="errors.locationPostalCode" class="mt-1 text-xs text-danger-600 dark:text-danger-400 font-medium">
+                  {{ errors.locationPostalCode }}
+                </p>
+                <p v-else class="mt-1 text-xs text-surface-500">Puts the role in local "jobs near me" searches.</p>
               </div>
               <div>
                 <label for="settings-type" class="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">

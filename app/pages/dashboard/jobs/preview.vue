@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ArrowLeft, Eye, RefreshCw } from 'lucide-vue-next'
+import { formatJobLocation } from '~~/shared/job-location'
 
 definePageMeta({
   layout: 'public',
@@ -25,7 +26,9 @@ type JobDraft = {
   form: {
     title: string
     description?: string
-    location?: string
+    locationCity?: string | null
+    locationRegion?: string | null
+    locationCountry?: string | null
     type: string
   }
   applicationForm: {
@@ -56,9 +59,16 @@ const coverLetterText = ref('')
 const previewJob = computed(() => {
   if (!draft.value) return null
 
+  const { locationCountry, locationCity, locationRegion, ...rest } = draft.value.form
+
   return {
-    ...draft.value.form,
+    ...rest,
     ...draft.value.applicationForm,
+    // The wizard stores structured parts; the display string is derived, the
+    // same way the API derives it on save.
+    location: locationCountry
+      ? formatJobLocation({ city: locationCity, region: locationRegion, country: locationCountry })
+      : undefined,
     phoneRequirement: draft.value.applicationForm.phoneRequirement ?? 'optional',
     organizationName: activeOrg.value?.name ?? null,
   }

@@ -33,11 +33,13 @@ export interface OrgUsage {
 }
 
 /** Count an org's currently-open roles (jobs with status 'open'). */
+// Mirrors the cap query in billing/plan.ts — test roles don't count, so the
+// usage meter matches what is actually being enforced.
 async function countOpenJobs(orgId: string): Promise<number> {
   const [row] = await db
     .select({ total: sql<string>`count(*)` })
     .from(job)
-    .where(and(eq(job.organizationId, orgId), eq(job.status, 'open')))
+    .where(and(eq(job.organizationId, orgId), eq(job.status, 'open'), eq(job.isTest, false)))
   return Number(row?.total ?? 0)
 }
 
