@@ -1,6 +1,13 @@
 import { readFileSync } from 'node:fs'
 import postgres from 'postgres'
-import { test, expect, declineAnalyticsConsent, e2eDatabaseUrl } from '../fixtures'
+import {
+  test,
+  expect,
+  declineAnalyticsConsent,
+  e2eDatabaseUrl,
+  publishableDescription,
+  JOB_LOCATION_PARTS,
+} from '../fixtures'
 
 type CreatedCandidate = {
   id: string
@@ -37,8 +44,10 @@ async function createOpenJob(
   const response = await page.request.post('/api/jobs', {
     data: {
       title,
-      description: 'A published role used to verify the applicant privacy notice.',
-      location: 'Oslo, Norway',
+      // Opening a role runs the publish guard, which wants a description of real
+      // length and a country the job boards can place it in.
+      description: publishableDescription('A published role used to verify the applicant privacy notice.'),
+      ...JOB_LOCATION_PARTS,
       type: 'full_time',
       status: 'open',
       phoneRequirement: 'optional',

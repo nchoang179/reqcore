@@ -1,4 +1,11 @@
-import { test, expect, declineAnalyticsConsent, getPublishedApplicationLink } from '../fixtures'
+import {
+  test,
+  expect,
+  declineAnalyticsConsent,
+  getPublishedApplicationLink,
+  publishableDescription,
+  selectJobLocation,
+} from '../fixtures'
 
 /**
  * Critical flow: Source tracking query parameters (?ref=, utm_*) propagate
@@ -32,6 +39,12 @@ test.describe('Source Tracking — Query Parameter Propagation', () => {
     await page.waitForLoadState('networkidle')
     await page.getByLabel('Job title').waitFor({ state: 'visible', timeout: 15_000 })
     await page.getByLabel('Job title').fill(JOB_TITLE)
+    // Minimal for this test's purposes, but a role still cannot go live without
+    // a description of real length and a placeable location.
+    await page.getByLabel('Description').fill(publishableDescription(
+      'A role used to verify that tracking parameters survive the apply flow.',
+    ))
+    await selectJobLocation(page)
 
     // Step 1 → Step 2
     await page.locator('form').getByRole('button', { name: 'Save & continue' }).first().waitFor({ state: 'attached', timeout: 10_000 })

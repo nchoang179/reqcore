@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { test as base, type BrowserContext, type Page } from '@playwright/test'
+import { test as base, expect as baseExpect, type BrowserContext, type Page } from '@playwright/test'
 import postgres from 'postgres'
 
 /**
@@ -71,20 +71,68 @@ export async function declineAnalyticsConsent(context: BrowserContext) {
   }])
 }
 
-export async function getPublishedApplicationLink(page: Page) {
-  await page.waitForFunction(() => {
-    return Array.from(document.querySelectorAll<HTMLInputElement>('input[readonly]'))
-      .some(input => /\/jobs\/[^/]+\/apply(?:$|[?#])/.test(input.value))
-  }, undefined, { timeout: 10_000 })
+/**
+ * A place the bundled GeoNames dataset resolves to exactly one result, so the
+ * picker's option list is never ambiguous.
+ */
+const JOB_LOCATION_QUERY = 'Oslo'
+export const JOB_LOCATION = 'Oslo, Norway'
 
-  const applicationLink = await page.locator('input[readonly]').evaluateAll(inputs => {
+/** The structured equivalent, for tests that create jobs through the API. */
+export const JOB_LOCATION_PARTS = { locationCity: 'Oslo', locationCountry: 'NO' }
+
+/**
+ * Picks a real place in the job form's location combobox.
+ *
+ * Typing commits nothing — only choosing a result gives the role the ISO country
+ * code publishing requires, so a test has to select the same way a recruiter
+ * does.
+ */
+export async function selectJobLocation(page: Page) {
+  const input = page.getByRole('combobox', { name: 'Location' })
+  await input.fill(JOB_LOCATION_QUERY)
+  await page.getByRole('option', { name: JOB_LOCATION, exact: true }).click()
+  await baseExpect(input).toHaveValue(JOB_LOCATION)
+}
+
+/**
+ * Pads a test's one-line summary past `MIN_DESCRIPTION_CHARS`.
+ *
+ * Job boards reject thin listings, so neither the wizard nor the publish guard
+ * will let a role go live under that floor — every spec that publishes needs a
+ * description of real length, not a sentence.
+ */
+export function publishableDescription(lead: string) {
+  return `${lead} The role owns its area end to end: you will ship changes every week, `
+    + 'review work from the rest of the team, and help set the standards we hold each other to. '
+    + 'We care more about how you think than about the exact tools on your CV.'
+}
+
+/**
+ * The apply URL of the role that was just published.
+ *
+ * The readonly field on the publish screen holds the public job page — that is
+ * the link a recruiter shares — so the apply URL is derived from it rather than
+ * read from a second field that no longer exists.
+ */
+export async function getPublishedApplicationLink(page: Page) {
+  const jobUrlPattern = String.raw`^https?://[^/]+/jobs/[^/?#]+$`
+
+  await page.waitForFunction((pattern) => {
+    const jobUrl = new RegExp(pattern)
+    return Array.from(document.querySelectorAll<HTMLInputElement>('input[readonly]'))
+      .some(input => jobUrl.test(input.value))
+  }, jobUrlPattern, { timeout: 10_000 })
+
+  const jobLink = await page.locator('input[readonly]').evaluateAll((inputs, pattern) => {
+    const jobUrl = new RegExp(pattern)
     return inputs
       .map(input => (input as HTMLInputElement).value)
-      .find(value => /\/jobs\/[^/]+\/apply(?:$|[?#])/.test(value))
-  })
+      .find(value => jobUrl.test(value))
+  }, jobUrlPattern)
 
-  if (!applicationLink) throw new Error('Published application link input was not found')
-  return applicationLink
+  if (!jobLink) throw new Error('Published job link input was not found')
+  return `${jobLink}/apply`
 }
 
 export const test = base.extend<Fixtures>({
