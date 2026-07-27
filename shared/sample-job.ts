@@ -42,6 +42,7 @@ export const SAMPLE_JOB_FORM = {
   locationCity: 'Manchester',
   locationRegion: 'England',
   locationCountry: 'GB',
+  locationPostalCode: null as string | null,
   type: 'full_time' as const,
   experienceLevel: 'mid' as const,
   remoteStatus: 'hybrid' as const,

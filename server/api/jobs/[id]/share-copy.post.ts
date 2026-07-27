@@ -26,7 +26,7 @@ export default defineEventHandler(async (event) => {
   const orgId = session.session.activeOrganizationId
 
   const { id } = await getValidatedRouterParams(event, idParamSchema.parse)
-  const body = await readBody<{ regenerate?: boolean }>(event).catch(() => ({}))
+  const body = await readBody<{ regenerate?: boolean }>(event).catch((): { regenerate?: boolean } => ({}))
 
   const found = await db.query.job.findFirst({
     where: and(eq(job.id, id), eq(job.organizationId, orgId)),
