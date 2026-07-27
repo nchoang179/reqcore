@@ -39,7 +39,7 @@
     "@ai-sdk/openai": "^3.0.58",
     "@aws-sdk/client-s3": "^3.1041.0",
     "@better-auth/sso": "^1.6.16",
-    "@better-auth/stripe": "^1.6.16",
+    "@better-auth/stripe": "^1.6.21",
     "@nuxtjs/i18n": "^10.3.0",
     "@nuxtjs/mdc": "^0.21.1",
     "@opentelemetry/api-logs": "^0.219.0",
@@ -74,8 +74,8 @@
     "zod": "^4.4.2"
   },
   "devDependencies": {
-    "@crowdin/cli": "^4.14.4",
-    "@playwright/test": "^1.61.1",
+    "@crowdin/cli": "^4.15.0",
+    "@playwright/test": "^1.62.0",
     "@types/html-to-text": "^9.0.4",
     "@types/node": "^25.9.5",
     "@types/nodemailer": "^8.0.0",
@@ -85,7 +85,7 @@
     "drizzle-kit": "^0.31.9",
     "tsx": "^4.23.1",
     "vitest": "^4.1.10",
-    "vue-tsc": "^3.3.7",
+    "vue-tsc": "^3.3.8",
     "wait-on": "^9.0.10"
   },
   "overrides": {
