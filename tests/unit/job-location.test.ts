@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { countryName, formatJobLocation, hasPublishableLocation, isValidPostalCode, normalizePostalCode } from '../../shared/job-location'
+import { countryName, formatJobLocation, hasPublishableLocation, isValidPostalCode, normalizePostalCode, resolveDerivedLocation } from '../../shared/job-location'
 
 describe('formatJobLocation', () => {
   it('builds the display string from the structured parts', () => {
@@ -42,6 +42,50 @@ describe('hasPublishableLocation', () => {
     expect(hasPublishableLocation({ locationCountry: null, remoteStatus: 'remote' })).toBe(true)
     expect(hasPublishableLocation({ locationCountry: null, remoteStatus: 'hybrid' })).toBe(false)
     expect(hasPublishableLocation({ locationCountry: null, remoteStatus: null })).toBe(false)
+  })
+})
+
+describe('resolveDerivedLocation', () => {
+  const picked = { locationCity: 'Oslo', locationRegion: null, locationCountry: 'NO' }
+  /** A role created before the picker existed: free text, nothing structured. */
+  const legacy = { locationCity: null, locationRegion: null, locationCountry: null }
+
+  it('writes nothing when the patch does not touch the location', () => {
+    // e.g. a title-only save.
+    expect(resolveDerivedLocation(picked, {})).toEqual({})
+  })
+
+  it('rederives the display string from the merged parts', () => {
+    expect(resolveDerivedLocation(picked, { locationCity: 'Bergen' }))
+      .toEqual({ location: 'Bergen, Norway' })
+    expect(resolveDerivedLocation(legacy, { locationCity: 'Austin', locationRegion: 'Texas', locationCountry: 'US' }))
+      .toEqual({ location: 'Austin, Texas, United States' })
+  })
+
+  it('clears the string and the postal code when the picked place is cleared', () => {
+    expect(resolveDerivedLocation({ ...picked, locationCountry: 'NO' }, {
+      locationCity: null,
+      locationRegion: null,
+      locationCountry: null,
+      locationPostalCode: null,
+    })).toEqual({ location: null, locationPostalCode: null })
+  })
+
+  it('leaves a legacy free-text location alone when the patch picks no place', () => {
+    // The settings form always sends all four structured fields, so a job that
+    // never had a country would otherwise have its only location nulled by an
+    // unrelated save.
+    expect(resolveDerivedLocation(legacy, {
+      locationCity: null,
+      locationRegion: null,
+      locationCountry: null,
+      locationPostalCode: null,
+    })).toEqual({ locationPostalCode: null })
+  })
+
+  it('never leaves a postal code without a country to place it', () => {
+    expect(resolveDerivedLocation(legacy, { locationPostalCode: '0150' }))
+      .toEqual({ locationPostalCode: null })
   })
 })
 

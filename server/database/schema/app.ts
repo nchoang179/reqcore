@@ -175,6 +175,11 @@ export const job = pgTable('job', {
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 }, (t) => ([
   index('job_organization_id_idx').on(t.organizationId),
+  // One test role per org. A test role skips the plan's active-role cap, so
+  // without this the walkthrough is a way to hold unlimited free open roles.
+  // Enforced here rather than only in the API because the check-then-insert in
+  // the create endpoint is racy — concurrent requests both pass it.
+  uniqueIndex('job_one_test_per_org_idx').on(t.organizationId).where(sql`${t.isTest}`),
 ]))
 
 /**

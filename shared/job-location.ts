@@ -78,6 +78,66 @@ export function formatJobLocation(parts: JobLocationParts | null | undefined): s
   return [city, keepRegion ? region : null, country].filter(Boolean).join(', ')
 }
 
+/** The structured location columns a job carries. */
+interface StoredJobLocation {
+  locationCity?: string | null
+  locationRegion?: string | null
+  locationCountry?: string | null
+}
+
+/** The same columns as a PATCH supplies them — absent means "not touched". */
+interface JobLocationPatch {
+  locationCity?: string | null
+  locationRegion?: string | null
+  locationCountry?: string | null
+  locationPostalCode?: string | null
+}
+
+/**
+ * The derived columns a job update should write, given what is stored and what
+ * the patch supplies.
+ *
+ * Only keys that should actually be written are returned; an empty object means
+ * "leave the stored values alone". That distinction is the point of this
+ * function. The job settings form always sends all four structured fields, so
+ * "the patch has no country" is ambiguous on its own: for a job that had a
+ * structured place it means *clear it*, but for a job created before the picker
+ * existed it means nothing was picked — and its hand-typed `location` is the
+ * only location that job has. Recomputing that one to NULL on an unrelated save
+ * (a title edit, a salary change) silently loses it from the public job page,
+ * the dashboard list and its search and sort.
+ */
+export function resolveDerivedLocation(
+  stored: StoredJobLocation,
+  patch: JobLocationPatch,
+): { location?: string | null, locationPostalCode?: string | null } {
+  const touchesLocation = patch.locationCity !== undefined
+    || patch.locationRegion !== undefined
+    || patch.locationCountry !== undefined
+    || patch.locationPostalCode !== undefined
+
+  if (!touchesLocation) return {}
+
+  const country = patch.locationCountry === undefined ? stored.locationCountry : patch.locationCountry
+
+  if (country) {
+    return {
+      location: formatJobLocation({
+        city: patch.locationCity === undefined ? stored.locationCity : patch.locationCity,
+        region: patch.locationRegion === undefined ? stored.locationRegion : patch.locationRegion,
+        country,
+      }),
+    }
+  }
+
+  // No country on the result: a postal code left behind is unplaceable, and
+  // sending one to a board only mis-pins the listing — so it always goes. The
+  // display string only goes when there was a structured place to clear.
+  return stored.locationCountry
+    ? { location: null, locationPostalCode: null }
+    : { locationPostalCode: null }
+}
+
 /**
  * Postal code characters that survive normalization.
  *

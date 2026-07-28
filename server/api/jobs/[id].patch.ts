@@ -1,6 +1,6 @@
 import { eq, and } from 'drizzle-orm'
 import { job } from '../../database/schema'
-import { formatJobLocation } from '../../../shared/job-location'
+import { resolveDerivedLocation } from '../../../shared/job-location'
 import { missingPublishRequirements } from '../../../shared/job-publish'
 import { idParamSchema, updateJobSchema, JOB_STATUS_TRANSITIONS } from '../../utils/schemas/job'
 
@@ -28,6 +28,7 @@ export default defineEventHandler(async (event) => {
       locationCountry: true,
       remoteStatus: true,
       validThrough: true,
+      isTest: true,
     },
   })
 
@@ -45,8 +46,10 @@ export default defineEventHandler(async (event) => {
       })
     }
 
-    // Re-opening a role counts against the plan's active-role limit.
-    if (body.status === 'open' && existing.status !== 'open') {
+    // Re-opening a role counts against the plan's active-role limit — except a
+    // test role, which is exempt on create for the same reason and is capped at
+    // one per org, so re-opening it cannot be used to dodge the cap.
+    if (body.status === 'open' && existing.status !== 'open' && !existing.isTest) {
       await assertActiveRoleLimit(orgId)
     }
   }
@@ -63,15 +66,13 @@ export default defineEventHandler(async (event) => {
     validThrough: body.validThrough === undefined ? existing.validThrough : body.validThrough,
   }
 
-  const touchesLocation = body.locationCity !== undefined
-    || body.locationRegion !== undefined
-    || body.locationCountry !== undefined
-    || body.locationPostalCode !== undefined
-
   // A role going live has to meet every board requirement. One already live is
   // only held to the ones this edit touches: roles opened before these rules
   // existed must stay editable, but an edit may not make a live role worse.
-  if ((body.status ?? existing.status) === 'open') {
+  //
+  // A test role is held to none of them — it never reaches a board, so the
+  // feed's completeness rules are meaningless for it, exactly as on create.
+  if ((body.status ?? existing.status) === 'open' && !existing.isTest) {
     const isOpening = body.status === 'open' && existing.status !== 'open'
     const changed = {
       // Trimmed, so re-saving an untrimmed legacy description is not read as an
@@ -98,15 +99,10 @@ export default defineEventHandler(async (event) => {
   delete (updates as any).slug // remove raw slug from spread — we set it explicitly below
 
   // Keep the free-text display string derived from the structured parts
-  // whenever either side is touched, so the two can never drift apart.
-  if (touchesLocation) {
-    updates.location = merged.locationCountry
-      ? formatJobLocation({ city: merged.locationCity, region: merged.locationRegion, country: merged.locationCountry })
-      : null
-    // Clearing the place clears its postal code with it — a code left behind
-    // after the country went away would be sent to boards that cannot use it.
-    if (!merged.locationCountry) updates.locationPostalCode = null
-  }
+  // whenever either side is touched, so the two can never drift apart. Writes
+  // nothing for a job that has no structured place and isn't being given one —
+  // see `resolveDerivedLocation` for why that case has to be left alone.
+  Object.assign(updates, resolveDerivedLocation(existing, body))
   if (body.title || body.slug) {
     updates.slug = generateJobSlug(body.title ?? existing.title, id, body.slug)
   }

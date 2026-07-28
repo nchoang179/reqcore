@@ -15,7 +15,13 @@ export default defineEventHandler(async (event) => {
   // completeness rules are meaningless for it, and charging it against the
   // active-role cap would mean a free workspace spends its only slot on the
   // walkthrough — turning "try it out" into a paywall.
-  if (body.status === 'open' && !body.isTest) {
+  //
+  // `isTest` is client-controlled, so the exemption is capped at one test role
+  // per org — otherwise it is just a way to open unlimited free roles.
+  if (body.isTest) {
+    await assertTestRoleLimit(orgId)
+  }
+  else if (body.status === 'open') {
     await assertActiveRoleLimit(orgId)
     assertPublishable(body)
   }
@@ -127,6 +133,12 @@ export default defineEventHandler(async (event) => {
     }
 
     return createdJob
+  }).catch(async (error) => {
+    // Lost a race with a concurrent create: the one-test-role-per-org index
+    // refused this one. Re-running the check gives the loser the same 409 the
+    // first caller's pre-check would have, rather than a 500.
+    if (isDuplicateTestRoleError(error)) await assertTestRoleLimit(orgId)
+    throw error
   })
 
   if (!created) {

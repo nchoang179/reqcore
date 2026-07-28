@@ -5,6 +5,7 @@ import {
   publishableDescription,
   selectJobLocation,
   JOB_LOCATION,
+  JOB_LOCATION_PARTS,
 } from '../fixtures'
 
 /**
@@ -216,5 +217,63 @@ test.describe('Job Creation Flow', () => {
     await expect(publishedQuestion).toBeVisible()
     await expect(publishedQuestion.getByRole('option', { name: 'Playwright' })).toHaveCount(1)
     await expect(publishedQuestion.getByRole('option', { name: 'Cypress' })).toHaveCount(1)
+  })
+
+  test('an org gets one test role, not an unlimited supply of free open ones', async ({ authenticatedPage }) => {
+    const page = authenticatedPage
+    const createTestRole = () => page.request.post('/api/jobs', {
+      data: {
+        title: `Walkthrough role ${Date.now()}`,
+        description: publishableDescription('Created by the try-it-out walkthrough.'),
+        ...JOB_LOCATION_PARTS,
+        type: 'full_time',
+        status: 'open',
+        isTest: true,
+        questions: [],
+        criteria: [],
+      },
+    })
+
+    // A test role is exempt from the plan's active-role cap, so the exemption
+    // itself is capped: without this, `?mode=test` opens unlimited free roles
+    // with live public apply links on a product priced per active role.
+    expect((await createTestRole()).status()).toBe(201)
+
+    const second = await createTestRole()
+    expect(second.status()).toBe(409)
+    expect((await second.json()).data?.code).toBe('TEST_ROLE_EXISTS')
+  })
+
+  test('saving unrelated settings keeps the location of a role that predates the picker', async ({ authenticatedPage }) => {
+    const page = authenticatedPage
+
+    const created = await page.request.post('/api/jobs', {
+      data: {
+        title: `Legacy located role ${Date.now()}`,
+        description: publishableDescription('Has free-text location and nothing structured.'),
+        location: 'Somewhere in Norway',
+        type: 'full_time',
+        status: 'draft',
+        questions: [],
+        criteria: [],
+      },
+    })
+    expect(created.status()).toBe(201)
+    const { id } = await created.json()
+
+    // What the settings form sends on every save: all four structured fields,
+    // null for a job that never had a place picked. That must not be read as
+    // "clear the location" — the free text is the only location this job has.
+    const saved = await page.request.patch(`/api/jobs/${id}`, {
+      data: {
+        title: 'Legacy located role, renamed',
+        locationCity: null,
+        locationRegion: null,
+        locationCountry: null,
+        locationPostalCode: null,
+      },
+    })
+    expect(saved.status()).toBe(200)
+    expect((await saved.json()).location).toBe('Somewhere in Norway')
   })
 })
