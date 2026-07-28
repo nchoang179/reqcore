@@ -162,7 +162,13 @@ export const job = pgTable('job', {
   requireResume: boolean('require_resume').notNull().default(false),
   requireCoverLetter: boolean('require_cover_letter').notNull().default(false),
   // ── AI scoring settings ──
-  autoScoreOnApply: boolean('auto_score_on_apply').notNull().default(false),
+  /**
+   * Ranking every applicant as they arrive is the default: a job created
+   * without an opinion on it should still produce a shortlist. It is inert on a
+   * job with no scoring criteria — `autoScoreApplication` returns before
+   * spending anything — so the default costs nothing on its own.
+   */
+  autoScoreOnApply: boolean('auto_score_on_apply').notNull().default(true),
   /**
    * Which optional candidate data sources the AI analysis reads. A resume is
    * always included when present, but another enabled source is sufficient.

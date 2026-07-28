@@ -414,6 +414,13 @@
       "when": 1785216635698,
       "tag": "0058_unique_devos",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1785262777727,
+      "tag": "0059_auto_score_on_apply_default_true",
+      "breakpoints": true
     }
   ]
 }

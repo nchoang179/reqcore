@@ -152,7 +152,13 @@ const isGeneratingCriteria = ref(false)
 const showCustomForm = ref(false)
 const showAdvanced = ref(false)
 const editingCriterion = ref<ScoringCriterionDraft | null>(null)
-const autoScoreOnApply = ref(false)
+/**
+ * Ranking every applicant is the reason the criteria exist, so it is on unless
+ * it is turned off. It still costs nothing on a job with no criteria: the
+ * submit below only sends it when there is a rubric to score against, and the
+ * scorer itself bails on a job with none.
+ */
+const autoScoreOnApply = ref(true)
 
 const customCriterionForm = ref({
   key: '',
@@ -279,6 +285,78 @@ async function generateAiCriteria() {
     isGeneratingCriteria.value = false
   }
 }
+
+/**
+ * The criteria this role gets written for it before anyone asks.
+ *
+ * Step 3 used to open on a choice between a canned template, an AI pass and
+ * skipping — a decision nobody has a basis for making about a feature they have
+ * not yet seen work. A finished rubric they can read and edit sells the scoring;
+ * a button offering to write one does not.
+ *
+ * It runs at most once per visit to the wizard. Clearing the list to get back to
+ * the options is a request for the other paths, not for a rewrite.
+ */
+const autoCriteriaState = ref<'idle' | 'running' | 'done' | 'failed'>('idle')
+
+async function autoGenerateCriteria() {
+  if (autoCriteriaState.value !== 'idle') return
+  // A restored draft, the sample role, or a set already chosen all arrive with
+  // criteria in hand — there is nothing left to write.
+  if (scoringCriteria.value.length > 0) return
+  // The walkthrough ships its own criteria so the sample shortlist matches them.
+  if (isTestMode.value) return
+  if (!isAiConfigured.value) return
+
+  const { title, description } = form.value
+  if (!title || !description) return
+
+  autoCriteriaState.value = 'running'
+  try {
+    const result = await $fetch('/api/ai-config/generate-criteria', {
+      method: 'POST',
+      body: { title, description },
+    })
+    const generated: ScoringCriterionDraft[] = (result.criteria ?? []).map((c: any) => ({
+      key: c.key,
+      name: c.name,
+      description: c.description ?? '',
+      category: c.category ?? 'custom',
+      maxScore: c.maxScore ?? 10,
+      weight: c.weight ?? 50,
+    }))
+
+    // Empty is a failure wearing a 200, and the user may well have picked a
+    // template by hand while this was in flight. Either way, leave the step
+    // showing what it would have shown without us.
+    if (generated.length === 0 || scoringCriteria.value.length > 0) {
+      autoCriteriaState.value = 'failed'
+      return
+    }
+
+    scoringCriteria.value = generated
+    scoringMode.value = 'ai'
+    autoCriteriaState.value = 'done'
+    track('ai_criteria_generated', { criteria_count: generated.length, auto: true })
+  } catch {
+    // Nobody asked for this, so nothing is said about it failing. Step 3 falls
+    // back to the recommended template — the screen it had before.
+    autoCriteriaState.value = 'failed'
+  }
+}
+
+/**
+ * Started on the way out of step 1 rather than on arrival at step 3, so the
+ * wait hides behind the application-form step instead of being a spinner the
+ * user sits and watches.
+ *
+ * A restored draft sitting past step 3 with an empty list is the one case to
+ * leave alone: that user reached the scoring step and chose to skip it, and
+ * writing criteria back in would overturn the answer they gave.
+ */
+watch(currentStep, (step) => {
+  if (step >= 2 && step <= 3) autoGenerateCriteria()
+})
 
 function addCustomCriterion() {
   const f = customCriterionForm.value
@@ -592,7 +670,8 @@ function resetFormState() {
   }
   scoringCriteria.value = []
   scoringMode.value = 'none'
-  autoScoreOnApply.value = false
+  autoScoreOnApply.value = true
+  autoCriteriaState.value = 'idle'
   distributeToBoards.value = true
   isPublished.value = false
   createdJobId.value = ''
@@ -1156,12 +1235,33 @@ const typeOptions = [
                 </div>
                 <p class="text-sm text-surface-500 dark:text-surface-400 mt-1">
                   <span class="font-medium text-surface-700 dark:text-surface-300">This step is optional — you can skip it and set up scoring later from job settings.</span>
-                  If you'd like AI to score and rank every applicant, we've recommended a set of criteria for this role below; use it as-is or customize.
+                  Every applicant is ranked against the criteria below. They're written from your job description, so read them over and change anything that doesn't fit.
                 </p>
               </div>
 
+                <!-- Criteria being written from the description -->
+                <div
+                  v-if="autoCriteriaState === 'running' && scoringCriteria.length === 0 && !showAdvanced"
+                  class="rounded-2xl border border-brand-200/80 dark:border-brand-800/60 bg-gradient-to-br from-brand-50 via-white to-white dark:from-brand-950/40 dark:via-surface-900 dark:to-surface-900 p-6 shadow-sm"
+                >
+                  <div class="flex items-start gap-4">
+                    <div class="inline-flex items-center justify-center size-11 rounded-xl bg-gradient-to-br from-brand-500 to-brand-600 text-white shadow-sm shadow-brand-600/20 shrink-0">
+                      <Loader2 class="size-5 animate-spin" />
+                    </div>
+                    <div class="flex-1 min-w-0">
+                      <h3 class="text-base font-semibold text-surface-900 dark:text-surface-100">Writing scoring criteria</h3>
+                      <p class="text-sm text-surface-500 dark:text-surface-400 mt-1 leading-relaxed">
+                        Reading your job description to work out what actually matters for this role.
+                      </p>
+                      <div class="flex flex-wrap gap-2 mt-4">
+                        <span v-for="n in 4" :key="n" class="h-6 w-28 animate-pulse rounded-lg bg-surface-100 dark:bg-surface-800" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 <!-- Recommended default: one-click, zero decisions -->
-                <div v-if="scoringCriteria.length === 0 && !showAdvanced" class="space-y-5">
+                <div v-else-if="scoringCriteria.length === 0 && !showAdvanced" class="space-y-5">
                   <div class="relative overflow-hidden rounded-2xl border border-brand-200/80 dark:border-brand-800/60 bg-gradient-to-br from-brand-50 via-white to-white dark:from-brand-950/40 dark:via-surface-900 dark:to-surface-900 p-6 shadow-sm">
                     <!-- Decorative glow -->
                     <div class="pointer-events-none absolute -right-16 -top-16 size-48 rounded-full bg-brand-200/30 dark:bg-brand-700/10 blur-3xl" />
@@ -1376,6 +1476,11 @@ const typeOptions = [
                       {{ scoringCriteria.length }} {{ scoringCriteria.length === 1 ? 'criterion' : 'criteria' }} configured
                     </h3>
                   </div>
+
+                  <p v-if="autoCriteriaState === 'done'" class="flex items-center gap-1.5 text-xs text-surface-500 dark:text-surface-400">
+                    <Sparkles class="size-3.5 text-brand-500 dark:text-brand-400 shrink-0" />
+                    Written from your job description. Adjust the weights, or use "Back to options" for a template instead.
+                  </p>
 
                   <div class="space-y-3">
                     <div

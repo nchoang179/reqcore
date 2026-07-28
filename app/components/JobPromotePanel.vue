@@ -235,7 +235,7 @@ const shareLanguageCode = ref<string>(SHARE_LANGUAGE_AUTO)
  */
 const shareLanguageChosen = ref(false)
 
-async function loadShareCopy(regenerate = false, language?: string) {
+async function loadShareCopy(regenerate = false, language?: string, auto = false) {
   isGenerating.value = true
   shareError.value = null
   try {
@@ -255,6 +255,7 @@ async function loadShareCopy(regenerate = false, language?: string) {
       job_id: props.jobId,
       source: result.source,
       language: shareLanguageCode.value,
+      auto,
     })
   } catch (err: any) {
     shareError.value = err?.data?.statusMessage ?? 'Could not write the share posts.'
@@ -362,8 +363,34 @@ async function createCustomBoardLink() {
   }
 }
 
+/**
+ * On the wizard's success screen the pack writes itself.
+ *
+ * "Write my posts" asks someone to opt into a thing they cannot see yet, at the
+ * one moment they are most likely to actually share the role. Six finished
+ * posts on screen make the case the button was only describing.
+ *
+ * Only on that screen: the Promote tab is also where people come just to grab
+ * the link, and generating for every job anyone ever opens would bill the whole
+ * back catalogue for posts nobody wanted. The tab keeps its button.
+ */
+async function autoWriteShareCopy() {
+  if (shareCopy.value || isGenerating.value) return
+  // A test role is barred from every public surface, so its posts have nowhere
+  // to go.
+  if (!data.value || data.value.job.isTest) return
+  // No explicit language: the copy follows the description, and a picker default
+  // guessed on the user's behalf would only earn a billed rewrite.
+  await loadShareCopy(false, undefined, true)
+  // Nobody asked for this, so a failure — no description, budget spent, provider
+  // down — must not put a red line under "Your job is live!". Clearing the error
+  // leaves the empty state, which offers the same thing as a button.
+  shareError.value = null
+}
+
 onMounted(() => {
   track('promote_tab_viewed', { job_id: props.jobId })
+  if (props.compact) autoWriteShareCopy()
 })
 </script>
 
