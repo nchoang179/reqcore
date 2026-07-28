@@ -15,6 +15,9 @@
  * Anything ambiguous is deliberately left alone — a wrong country on a live
  * posting is worse than no country, and the job settings page now prompts the
  * recruiter to fix what this cannot.
+ *
+ * One-word locations that resolve to a whole country are reported separately
+ * and never written without `--apply-countries` as well. See `needsConfirming`.
  */
 import { drizzle } from 'drizzle-orm/postgres-js'
 import postgres from 'postgres'
@@ -22,7 +25,7 @@ import { and, eq, isNull, isNotNull } from 'drizzle-orm'
 import * as schema from '../database/schema'
 import { job } from '../database/schema'
 import { formatJobLocation } from '../../shared/job-location'
-import { resolvePlaceLabel } from '../utils/geo/search'
+import { resolvePlaceLabel, type GeoPlace } from '../utils/geo/search'
 
 const processWithLoadEnv = process as NodeJS.Process & { loadEnvFile?: (path?: string) => void }
 if (!process.env.DATABASE_URL && typeof processWithLoadEnv.loadEnvFile === 'function') {
@@ -30,6 +33,7 @@ if (!process.env.DATABASE_URL && typeof processWithLoadEnv.loadEnvFile === 'func
 }
 
 const apply = process.argv.includes('--apply')
+const applyCountries = process.argv.includes('--apply-countries')
 
 const DATABASE_URL = process.env.DATABASE_URL ?? ''
 if (!DATABASE_URL) {
@@ -55,6 +59,24 @@ function cleanLocationText(raw: string): string {
     .trim()
 }
 
+/**
+ * Whether a resolution has to be eyeballed before it is written.
+ *
+ * The dataset holds cities and countries but no subnational regions, so a bare
+ * "Georgia" has nothing to be ambiguous *with* and resolves cleanly to the
+ * country GE — as do Jordan, Lebanon, Chad and Niger, all US-state or
+ * region names too. Worse, the diff line for those reads "Georgia" → "Georgia",
+ * which is exactly what a reviewer skims past.
+ *
+ * A one-word input that came back as a whole country is the shape of that
+ * mistake, so those are held back and reported on their own. Genuine
+ * country-wide roles ("Norway") land here too; confirming a short list is the
+ * cheap side of this trade.
+ */
+function needsConfirming(place: GeoPlace, matchedOn: string): boolean {
+  return !place.city && !/[\s,]/.test(matchedOn)
+}
+
 async function main() {
   const rows = await db.select({
     id: job.id,
@@ -66,7 +88,8 @@ async function main() {
 
   console.log(`${rows.length} job(s) with free-text location and no country.\n`)
 
-  const matched: { id: string, from: string, to: string }[] = []
+  const matched: { id: string, title: string, from: string, to: string, place: GeoPlace }[] = []
+  const countryOnly: typeof matched = []
   const unresolved: { id: string, title: string, location: string }[] = []
 
   for (const row of rows) {
@@ -77,9 +100,11 @@ async function main() {
     // Try the whole string first, then progressively drop trailing segments:
     // "Berlin, Germany (Hybrid)" → "Berlin, Germany", "Oslo, Norway HQ" → "Oslo".
     const segments = cleaned.split(',').map(part => part.trim()).filter(Boolean)
-    let place = null
+    let place: GeoPlace | null = null
+    let matchedOn = ''
     for (let take = segments.length; take > 0 && !place; take -= 1) {
-      place = resolvePlaceLabel(segments.slice(0, take).join(', '))
+      matchedOn = segments.slice(0, take).join(', ')
+      place = resolvePlaceLabel(matchedOn)
     }
 
     if (!place) {
@@ -88,9 +113,10 @@ async function main() {
     }
 
     const label = formatJobLocation(place)
-    matched.push({ id: row.id, from: raw, to: label })
+    const heldBack = needsConfirming(place, matchedOn)
+    ;(heldBack ? countryOnly : matched).push({ id: row.id, title: row.title, from: raw, to: label, place })
 
-    if (apply) {
+    if (apply && (!heldBack || applyCountries)) {
       await db.update(job).set({
         locationCity: place.city,
         locationRegion: place.region,
@@ -102,12 +128,24 @@ async function main() {
   }
 
   for (const m of matched) console.log(`  ✓ ${JSON.stringify(m.from)} → ${JSON.stringify(m.to)}`)
+
+  if (countryOnly.length) {
+    console.log('\nResolved to a whole country — confirm each one:')
+    console.log('  (no city or region; a US state or province name resolves to the country that shares it)')
+    for (const c of countryOnly) {
+      console.log(`  ? ${JSON.stringify(c.from)} → the country ${c.place.countryName} [${c.place.country}]  (${c.title})`)
+    }
+    console.log(applyCountries
+      ? '  Written (--apply-countries).'
+      : '  Left alone. Re-run with --apply --apply-countries once checked.')
+  }
+
   if (unresolved.length) {
     console.log('\nLeft alone (ambiguous or unknown — recruiter is prompted in job settings):')
     for (const u of unresolved) console.log(`  · ${JSON.stringify(u.location)}  (${u.title})`)
   }
 
-  console.log(`\n${matched.length} matched, ${unresolved.length} unresolved.`)
+  console.log(`\n${matched.length} matched, ${countryOnly.length} country-only, ${unresolved.length} unresolved.`)
   console.log(apply ? 'Applied.' : 'Dry run — re-run with --apply to write.')
 
   await client.end()

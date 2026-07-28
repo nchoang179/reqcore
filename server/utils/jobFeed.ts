@@ -46,6 +46,28 @@ export function isFeedBoard(value: string): value is FeedBoard {
 /** Emitted as <date>/validThrough when a job has no explicit expiry. */
 export const DEFAULT_FEED_VALIDITY_DAYS = 60
 
+/**
+ * Characters XML 1.0 forbids outright. There is no escape for them and CDATA
+ * does not exempt them, so one anywhere in the document makes the *whole* feed
+ * unparseable to a strict ingester — every job is lost, not just the one that
+ * carried it. Lenient parsers accept them, which is why this has to be
+ * prevented at write time rather than caught by spot-checking the output.
+ *
+ * They arrive routinely: vertical tab and form feed are what a description
+ * pasted out of Word or a PDF brings with it. Same set the resume parser
+ * strips in `normalizeText` — tab, newline and carriage return stay.
+ */
+const XML_ILLEGAL_CHARS = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g
+
+/**
+ * Wrap a value for the feed. Illegal characters are dropped first, then `]]>`
+ * is neutralised so the payload cannot terminate the section early — that
+ * order matters, since stripping can join `]]` and `>` into a terminator.
+ */
+export function feedCdata(value: string): string {
+  return `<![CDATA[${value.replace(XML_ILLEGAL_CHARS, '').replace(/]]>/g, ']]&gt;')}]]>`
+}
+
 export type FeedIneligibilityCode =
   | 'not_open'
   | 'test_job'

@@ -3,6 +3,7 @@ import { job, orgSettings, organization, member, user } from '../database/schema
 import { markdownToFeedHtml } from '../../shared/job-description'
 import {
   checkFeedEligibility,
+  feedCdata,
   feedValidThrough,
   isFeedBoard,
   type FeedBoard,
@@ -34,17 +35,9 @@ function xmlEscape(value: string): string {
     .replace(/'/g, '&apos;')
 }
 
-/**
- * Wrap in CDATA. The payload is escaped first, so a description containing
- * `]]>` cannot terminate the section early and break the whole feed.
- */
-function cdata(value: string): string {
-  return `<![CDATA[${value.replace(/]]>/g, ']]&gt;')}]]>`
-}
-
 function tag(name: string, value: string | null | undefined): string {
   if (!value) return ''
-  return `    <${name}>${cdata(value)}</${name}>\n`
+  return `    <${name}>${feedCdata(value)}</${name}>\n`
 }
 
 /** Feed convention for employment type, as read by the target aggregators. */

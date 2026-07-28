@@ -52,8 +52,11 @@ export function normalizePlaceQuery(value: string): string {
 let index: IndexEntry[] | null = null
 
 /**
- * Built once per process on first search rather than at import time — the
- * server should not pay for this on boot when most requests never search.
+ * Built once per process. The build walks ~34k cities and is a few hundred
+ * milliseconds of uninterruptible synchronous work, so whichever request
+ * triggers it stalls every other request in flight. It stays lazy — scripts and
+ * tests should not pay for it — but the server warms it at boot via
+ * `warmPlaceIndex()` so that cost never lands on a live typeahead keystroke.
  */
 function getIndex(): IndexEntry[] {
   if (index) return index
@@ -96,6 +99,14 @@ function getIndex(): IndexEntry[] {
 
   index = entries
   return entries
+}
+
+/**
+ * Build the index now, if it is not built already. Idempotent and safe to call
+ * from anywhere; the server calls it from a boot plugin.
+ */
+export function warmPlaceIndex(): void {
+  getIndex()
 }
 
 /** Lower is better. `null` means the entry does not match at all. */

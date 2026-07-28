@@ -64,6 +64,19 @@ describe('resolvePlaceLabel', () => {
     expect(resolvePlaceLabel('London')?.country).toBe('GB')
   })
 
+  it('resolves a bare country name to a place with no city', () => {
+    // The dataset has no subnational regions, so a US state or province name
+    // that a country also carries resolves to the country with nothing to be
+    // ambiguous against. `backfill-job-location.ts` holds these back for a
+    // human rather than writing "Georgia" the state as the country GE — the
+    // absent city is what it keys on, so that property is pinned here.
+    for (const [name, code] of [['Georgia', 'GE'], ['Jordan', 'JO'], ['Chad', 'TD']] as const) {
+      const place = resolvePlaceLabel(name)
+      expect(place?.country).toBe(code)
+      expect(place?.city).toBeNull()
+    }
+  })
+
   it('refuses to guess when the name is ambiguous or unknown', () => {
     // Wrong country on a live posting is worse than no country.
     expect(resolvePlaceLabel('Springfield')).toBeNull()
