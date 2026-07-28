@@ -390,8 +390,21 @@ const isAiConfigured = computed(() => {
  */
 const distributeToBoards = ref(true)
 
+/**
+ * Whether this visit is the test-job walkthrough rather than a real role.
+ * Declared here because the autosave below keys off it.
+ */
+const isTestMode = computed(() => route.query.mode === 'test')
+
 // Auto-save to localStorage
+//
+// The walkthrough saves under its own key. It shares this page with the real
+// wizard, so with one key the sample role would overwrite a half-finished real
+// draft — and then come back in its place the next time someone starts a
+// genuine role.
 const AUTO_SAVE_KEY = 'reqcore-job-draft'
+const TEST_AUTO_SAVE_KEY = 'reqcore-job-draft-test'
+const autoSaveKey = computed(() => (isTestMode.value ? TEST_AUTO_SAVE_KEY : AUTO_SAVE_KEY))
 
 function saveFormToStorage() {
   if (!import.meta.client) return
@@ -405,19 +418,23 @@ function saveFormToStorage() {
       distributeToBoards: distributeToBoards.value,
       currentStep: currentStep.value,
     }
-    localStorage.setItem(AUTO_SAVE_KEY, JSON.stringify(data))
+    localStorage.setItem(autoSaveKey.value, JSON.stringify(data))
   } catch { /* storage full or unavailable */ }
 }
 
 function openDraftPreview() {
   saveFormToStorage()
-  window.open(localePath('/dashboard/jobs/preview'), '_blank', 'noopener,noreferrer')
+  // The mode travels with the link so the preview reads the same key we just wrote.
+  const path = localePath(isTestMode.value
+    ? { path: '/dashboard/jobs/preview', query: { mode: 'test' } }
+    : '/dashboard/jobs/preview')
+  window.open(path, '_blank', 'noopener,noreferrer')
 }
 
 function restoreFormFromStorage() {
   if (!import.meta.client) return
   try {
-    const raw = localStorage.getItem(AUTO_SAVE_KEY)
+    const raw = localStorage.getItem(autoSaveKey.value)
     if (!raw) return
     const data = z.object({
       form: z.unknown().optional(),
@@ -459,7 +476,7 @@ function restoreFormFromStorage() {
 
 function clearFormStorage() {
   if (!import.meta.client) return
-  try { localStorage.removeItem(AUTO_SAVE_KEY) } catch { /* ignore */ }
+  try { localStorage.removeItem(autoSaveKey.value) } catch { /* ignore */ }
 }
 
 // ─────────────────────────────────────────────
@@ -475,8 +492,9 @@ function clearFormStorage() {
  * step arrives filled in with a believable role they can read, edit or click
  * straight past. That is the step people were faking their way through when
  * they typed "asdf" into the title to get to the end.
+ *
+ * The `?mode=test` flag itself is declared up with the autosave, which keys off it.
  */
-const isTestMode = computed(() => route.query.mode === 'test')
 
 /** Which steps have played their reveal, so going back doesn't replay it. */
 const revealedSteps = ref(new Set<number>())
@@ -514,21 +532,46 @@ async function revealStep(step: number) {
 
 watch(currentStep, step => revealStep(step))
 
-onMounted(() => {
+/**
+ * Fills the wizard for whichever mode the URL asks for.
+ *
+ * The walkthrough always starts from the sample role, never from its own saved
+ * copy, so it reads the same on every visit. The real wizard picks up whatever
+ * draft was left behind — which is only the recruiter's own work, since the
+ * walkthrough writes to a separate key.
+ */
+function loadForMode() {
   if (isTestMode.value) {
-    // Deliberately ahead of the autosave restore: a half-finished real draft
-    // from a previous visit must not bleed into the walkthrough.
-    clearFormStorage()
     applySampleContent()
     revealStep(1)
     track('sample_job_started')
     return
   }
   restoreFormFromStorage()
+}
+
+onMounted(loadForMode)
+
+/**
+ * Both modes live on this one page, so switching between them (New Job in the
+ * top bar, a link back to the real wizard) changes the query without
+ * remounting. Without this the sample role would sit in the fields of what is
+ * now a real role, waiting to be deleted by hand.
+ */
+watch(isTestMode, () => {
+  resetFormState()
+  revealedSteps.value.clear()
+  loadForMode()
 })
 
 // Reset all wizard state to initial values (called when user clicks "New Job" again)
 function resetState() {
+  resetFormState()
+  clearFormStorage()
+}
+
+/** The field reset on its own — leaves whatever is in storage alone. */
+function resetFormState() {
   currentStep.value = 1
   form.value = {
     title: '',
@@ -556,7 +599,6 @@ function resetState() {
   createdJobSlug.value = ''
   finalApplicationLink.value = ''
   errors.value = {}
-  clearFormStorage()
 }
 
 // Shared signal incremented by AppTopBar when the user is already on this page
@@ -983,9 +1025,7 @@ const typeOptions = [
 
               <!-- Location + postal code -->
               <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
-                <!-- Takes the whole row until a place is picked, so the empty
-                     third does not read as a field the recruiter skipped. -->
-                <div :class="form.locationCountry ? 'md:col-span-2' : 'md:col-span-3'">
+                <div class="md:col-span-2">
                   <label for="location" class="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
                     Location <span class="text-danger-500">*</span>
                   </label>
@@ -999,9 +1039,10 @@ const typeOptions = [
                   </p>
                   <p v-else class="mt-1.5 text-xs text-surface-500">Boards place listings by country. For a role with no base, set Workplace to Remote instead.</p>
                 </div>
-                <!-- Only once a place is picked: a postal code with no country
-                     is unplaceable, and the field would just be noise. -->
-                <div v-if="form.locationCountry">
+                <!-- Always on the row so the field is never missing, but inert
+                     until a place is picked: the API drops a postal code with no
+                     country, so accepting one first would silently lose it. -->
+                <div>
                   <label for="location-postal-code" class="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
                     Postal code <span class="font-normal text-surface-400">(optional)</span>
                   </label>
@@ -1010,15 +1051,17 @@ const typeOptions = [
                     v-model="form.locationPostalCode"
                     type="text"
                     :maxlength="POSTAL_CODE_MAX_LENGTH"
+                    :disabled="!form.locationCountry"
                     autocomplete="postal-code"
                     placeholder="e.g. 0150"
-                    class="w-full rounded-lg border px-3 py-2.5 text-sm text-surface-900 dark:text-surface-100 bg-white dark:bg-surface-900 placeholder:text-surface-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-colors"
+                    class="w-full rounded-lg border px-3 py-2.5 text-sm text-surface-900 dark:text-surface-100 bg-white dark:bg-surface-900 placeholder:text-surface-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
                     :class="errors.locationPostalCode ? 'border-danger-300 ring-1 ring-danger-100' : 'border-surface-300 dark:border-surface-700'"
                     @blur="validateStep1"
                   />
                   <p v-if="errors.locationPostalCode" class="mt-1.5 text-xs text-danger-600 dark:text-danger-400 font-medium">
                     {{ errors.locationPostalCode }}
                   </p>
+                  <p v-else-if="!form.locationCountry" class="mt-1.5 text-xs text-surface-500">Pick a location first.</p>
                   <p v-else class="mt-1.5 text-xs text-surface-500">Puts the role in local "jobs near me" searches.</p>
                 </div>
               </div>

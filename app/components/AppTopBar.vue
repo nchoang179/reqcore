@@ -190,7 +190,10 @@ const newJobResetSignal = useState('new-job-reset-signal', () => 0)
 
 function handleNewJobClick() {
   const newJobPath = localePath('/dashboard/jobs/new')
-  if (route.path === newJobPath) {
+  // The test walkthrough sits on this same path under ?mode=test. From there
+  // this button has to navigate, so the query — and the sample role it fills
+  // the wizard with — is actually dropped.
+  if (route.path === newJobPath && !route.query.mode) {
     // Already on the page: signal the wizard to reset instead of navigating
     newJobResetSignal.value++
   } else {

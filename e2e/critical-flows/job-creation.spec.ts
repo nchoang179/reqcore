@@ -244,6 +244,28 @@ test.describe('Job Creation Flow', () => {
     expect((await second.json()).data?.code).toBe('TEST_ROLE_EXISTS')
   })
 
+  test('the test role does not follow the user back into the real wizard', async ({ authenticatedPage }) => {
+    const page = authenticatedPage
+    const title = page.getByLabel('Job title')
+
+    // A real draft in progress, left behind the way the autosave leaves it.
+    await page.goto('/dashboard/jobs/new')
+    await title.fill('Actual role I was writing')
+    await expect(title).toHaveValue('Actual role I was writing')
+
+    // Detour through the walkthrough, which fills every field with the sample role.
+    await page.goto('/dashboard/jobs/new?mode=test')
+    await expect(page.getByText("You're creating a test job")).toBeVisible()
+    await expect(title).toHaveValue('Customer Support Specialist')
+
+    // Back to the real wizard: the sample role must be gone — having to clear
+    // every field by hand before typing is what this guards against — and the
+    // recruiter's own draft must have survived the detour.
+    await page.goto('/dashboard/jobs/new')
+    await expect(page.getByText("You're creating a test job")).toHaveCount(0)
+    await expect(title).toHaveValue('Actual role I was writing')
+  })
+
   test('saving unrelated settings keeps the location of a role that predates the picker', async ({ authenticatedPage }) => {
     const page = authenticatedPage
 

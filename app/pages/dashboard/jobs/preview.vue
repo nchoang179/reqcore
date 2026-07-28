@@ -39,7 +39,14 @@ type JobDraft = {
   }
 }
 
+// The test-job walkthrough autosaves under its own key so it can't overwrite a
+// real draft; ?mode=test says which of the two this preview was opened for.
 const JOB_DRAFT_STORAGE_KEY = 'reqcore-job-draft'
+const TEST_JOB_DRAFT_STORAGE_KEY = 'reqcore-job-draft-test'
+const draftStorageKey = useRoute().query.mode === 'test'
+  ? TEST_JOB_DRAFT_STORAGE_KEY
+  : JOB_DRAFT_STORAGE_KEY
+
 const draft = ref<JobDraft | null>(null)
 const isReady = ref(false)
 const submitError = ref<string | null>(null)
@@ -79,7 +86,7 @@ function loadDraft() {
   submitError.value = null
 
   try {
-    const raw = localStorage.getItem(JOB_DRAFT_STORAGE_KEY)
+    const raw = localStorage.getItem(draftStorageKey)
     if (!raw) {
       draft.value = null
       return
