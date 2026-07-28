@@ -247,11 +247,22 @@ test.describe('Job Creation Flow', () => {
   test('the test role does not follow the user back into the real wizard', async ({ authenticatedPage }) => {
     const page = authenticatedPage
     const title = page.getByLabel('Job title')
+    const DRAFT_TITLE = 'Actual role I was writing'
+    const savedDraftTitle = () => page.evaluate(() => {
+      const raw = localStorage.getItem('reqcore-job-draft')
+      return raw ? JSON.parse(raw).form?.title ?? null : null
+    })
 
     // A real draft in progress, left behind the way the autosave leaves it.
+    // Typed before hydration it would land in the DOM but never reach the
+    // wizard's state, so wait on the autosave rather than on the field looking
+    // filled — that is the part the rest of the test depends on.
     await page.goto('/dashboard/jobs/new')
-    await title.fill('Actual role I was writing')
-    await expect(title).toHaveValue('Actual role I was writing')
+    await page.waitForLoadState('networkidle')
+    await expect.poll(async () => {
+      await title.fill(DRAFT_TITLE)
+      return await savedDraftTitle()
+    }).toBe(DRAFT_TITLE)
 
     // Detour through the walkthrough, which fills every field with the sample role.
     await page.goto('/dashboard/jobs/new?mode=test')
@@ -263,7 +274,7 @@ test.describe('Job Creation Flow', () => {
     // recruiter's own draft must have survived the detour.
     await page.goto('/dashboard/jobs/new')
     await expect(page.getByText("You're creating a test job")).toHaveCount(0)
-    await expect(title).toHaveValue('Actual role I was writing')
+    await expect(title).toHaveValue(DRAFT_TITLE)
   })
 
   test('saving unrelated settings keeps the location of a role that predates the picker', async ({ authenticatedPage }) => {

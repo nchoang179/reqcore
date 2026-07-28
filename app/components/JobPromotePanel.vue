@@ -2,8 +2,9 @@
 import {
   Share2, Globe2, Link2, Copy, Check, ExternalLink, Loader2, Plus,
   BarChart3, Sparkles, RefreshCw, AlertCircle, CheckCircle2, CircleSlash, Rss,
-  Linkedin, Facebook, MessageCircle, Hash, Mail, Users,
+  Linkedin, Facebook, MessageCircle, Hash, Mail, Users, Languages,
 } from 'lucide-vue-next'
+import { SHARE_LANGUAGES, SHARE_LANGUAGE_AUTO } from '~~/shared/share-languages'
 
 /**
  * The permanent home for "how do I get applicants for this job?".
@@ -146,6 +147,9 @@ async function ensureLink(channel: string, label: string): Promise<string> {
  * `prefillsText` records whether the platform actually accepts post text via
  * URL. LinkedIn and Facebook do not reliably honour it, so those channels get
  * a "copy, then paste" flow instead of a promise the composer won't keep.
+ *
+ * `build` takes the finished post — copy, apply line and link already joined —
+ * so no channel can end up shipping the text without the call to apply.
  */
 const shareChannels = [
   {
@@ -153,7 +157,7 @@ const shareChannels = [
     label: 'LinkedIn',
     icon: Linkedin,
     prefillsText: false,
-    build: (_text: string, url: string) =>
+    build: (_post: string, url: string) =>
       `https://www.linkedin.com/feed/?shareActive=true&shareUrl=${encodeURIComponent(url)}`,
   },
   {
@@ -161,15 +165,15 @@ const shareChannels = [
     label: 'X',
     icon: Hash,
     prefillsText: true,
-    build: (text: string, url: string) =>
-      `https://x.com/intent/post?text=${encodeURIComponent(`${text}\n\n${url}`)}`,
+    build: (post: string) =>
+      `https://x.com/intent/post?text=${encodeURIComponent(post)}`,
   },
   {
     key: 'facebook',
     label: 'Facebook',
     icon: Facebook,
     prefillsText: false,
-    build: (_text: string, url: string) =>
+    build: (_post: string, url: string) =>
       `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}`,
   },
   {
@@ -177,24 +181,24 @@ const shareChannels = [
     label: 'WhatsApp',
     icon: MessageCircle,
     prefillsText: true,
-    build: (text: string, url: string) =>
-      `https://wa.me/?text=${encodeURIComponent(`${text}\n\n${url}`)}`,
+    build: (post: string) =>
+      `https://wa.me/?text=${encodeURIComponent(post)}`,
   },
   {
     key: 'reddit',
     label: 'Reddit',
     icon: MessageCircle,
     prefillsText: true,
-    build: (text: string, url: string) =>
-      `https://www.reddit.com/submit?title=${encodeURIComponent(data.value?.job.title ?? 'We are hiring')}&text=${encodeURIComponent(`${text}\n\n${url}`)}`,
+    build: (post: string) =>
+      `https://www.reddit.com/submit?title=${encodeURIComponent(data.value?.job.title ?? 'We are hiring')}&text=${encodeURIComponent(post)}`,
   },
   {
     key: 'email',
     label: 'Email your team',
     icon: Mail,
     prefillsText: true,
-    build: (text: string, url: string) =>
-      `mailto:?subject=${encodeURIComponent(`We're hiring: ${data.value?.job.title ?? ''}`)}&body=${encodeURIComponent(`${text}\n\n${url}`)}`,
+    build: (post: string) =>
+      `mailto:?subject=${encodeURIComponent(`We're hiring: ${data.value?.job.title ?? ''}`)}&body=${encodeURIComponent(post)}`,
   },
 ] as const
 
@@ -213,21 +217,45 @@ const shareCopyGeneratedAt = ref<string | null>(null)
 const isGenerating = ref(false)
 const shareError = ref<string | null>(null)
 
-async function loadShareCopy(regenerate = false) {
+/**
+ * Language the posts are written in.
+ *
+ * Seeded from whatever the server has cached rather than from the UI locale —
+ * the dashboard's language says nothing about the market being hired into, and
+ * resetting the picker on every visit would invite an accidental rewrite.
+ */
+const shareLanguageCode = ref<string>(SHARE_LANGUAGE_AUTO)
+
+/**
+ * Whether the picker holds a real choice or just its default.
+ *
+ * Until someone touches it, the first generation asks for no language at all,
+ * so a job that already has posts cached in Norwegian comes back in Norwegian
+ * instead of being rewritten — and re-billed — into the picker's default.
+ */
+const shareLanguageChosen = ref(false)
+
+async function loadShareCopy(regenerate = false, language?: string) {
   isGenerating.value = true
   shareError.value = null
   try {
     const result = await $fetch<{
       channels: Record<string, string>
       generatedAt: string
+      language?: string
       source: 'cache' | 'generated'
     }>(`/api/jobs/${props.jobId}/share-copy`, {
       method: 'POST',
-      body: { regenerate },
+      body: { regenerate, language },
     })
     shareCopy.value = result.channels
     shareCopyGeneratedAt.value = result.generatedAt
-    track('share_copy_generated', { job_id: props.jobId, source: result.source })
+    shareLanguageCode.value = result.language ?? SHARE_LANGUAGE_AUTO
+    track('share_copy_generated', {
+      job_id: props.jobId,
+      source: result.source,
+      language: shareLanguageCode.value,
+    })
   } catch (err: any) {
     shareError.value = err?.data?.statusMessage ?? 'Could not write the share posts.'
   } finally {
@@ -235,19 +263,77 @@ async function loadShareCopy(regenerate = false) {
   }
 }
 
+/**
+ * Picking a language rewrites the pack in it — a generation the user asked for,
+ * so it runs on select rather than hiding behind a second confirm. The picker
+ * snaps back if the rewrite fails, so it never claims a language that isn't in
+ * the posts on screen.
+ */
+async function changeShareLanguage(code: string) {
+  if (code === shareLanguageCode.value) return
+  const previous = shareLanguageCode.value
+  shareLanguageCode.value = code
+  shareLanguageChosen.value = true
+  await loadShareCopy(true, code)
+  if (shareError.value) shareLanguageCode.value = previous
+}
+
+/**
+ * The link that will be attached to this channel's post.
+ *
+ * The copy is written without a URL, so the link has to come from here — and
+ * the card has to show it, otherwise the post reads as if it forgot to tell
+ * anyone where to apply. Before a channel has been shared once there is no
+ * tracked link to show yet, so the plain application link stands in: same
+ * destination, and minting six links just to render the panel would be waste.
+ */
+function attachedUrl(channelKey: string) {
+  const source = SHARE_CHANNEL_SOURCE[channelKey] ?? 'other'
+  const existing = data.value?.trackingLinks?.find(l => l.channel === source && l.isActive)
+  return existing ? trackedUrl(existing.code) : applicationUrl.value
+}
+
+/**
+ * The apply line that introduces the link.
+ *
+ * Written by the model so it lands in the post's own language — the copy
+ * follows the job description, which is often not the language of the UI.
+ * Older cached posts predate the field, hence the fallback.
+ */
+const applyCta = computed(() => shareCopy.value?.applyCta?.trim() || 'Apply here:')
+
+/** The post exactly as it should land in the composer: copy, apply line, link. */
+function postWithLink(text: string, url: string) {
+  const cta = `${applyCta.value} ${url}`
+  return text ? `${text}\n\n${cta}` : cta
+}
+
+async function copyPost(channel: typeof shareChannels[number]) {
+  const text = shareCopy.value?.[channel.key] ?? ''
+  // Copying the post without a link is the one outcome this panel must never
+  // produce, so a failed mint falls back to the untracked application link.
+  const url = await ensureLink(SHARE_CHANNEL_SOURCE[channel.key] ?? 'other', channel.label)
+    .catch(() => applicationUrl.value)
+  await copy(`copy-${channel.key}`, postWithLink(text, url))
+}
+
 async function openComposer(channel: typeof shareChannels[number]) {
   const text = shareCopy.value?.[channel.key] ?? ''
+  // If the link can't be minted, share the untracked link rather than nothing:
+  // losing attribution costs a statistic, losing the share costs a candidate.
   const url = await ensureLink(SHARE_CHANNEL_SOURCE[channel.key] ?? 'other', channel.label)
+    .catch(() => applicationUrl.value)
+  const post = postWithLink(text, url)
 
   // Platforms that ignore prefilled text still need the post on the clipboard,
   // otherwise the composer opens empty and the user is back to a blank box.
-  if (!channel.prefillsText && text) {
-    await copy(channel.key, `${text}\n\n${url}`)
+  if (!channel.prefillsText) {
+    await copy(channel.key, post)
     toast.info('Post copied', 'Paste it into the composer that just opened.')
   }
 
   track('share_composer_opened', { job_id: props.jobId, channel: channel.key })
-  window.open(channel.build(text, url), '_blank', 'noopener,noreferrer')
+  window.open(channel.build(post, url), '_blank', 'noopener,noreferrer')
 }
 
 // ─────────────────────────────────────────────
@@ -445,16 +531,31 @@ onMounted(() => {
             Written for you, with a tracked link attached so you can see what works.
           </p>
         </div>
-        <button
-          v-if="shareCopy"
-          type="button"
-          :disabled="isGenerating"
-          class="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-surface-200 dark:border-surface-700 px-3 py-1.5 text-xs font-medium text-surface-600 dark:text-surface-400 transition-colors hover:bg-surface-50 dark:hover:bg-surface-800 disabled:opacity-50"
-          @click="loadShareCopy(true)"
-        >
-          <RefreshCw class="size-3" :class="isGenerating ? 'animate-spin' : ''" />
-          Rewrite
-        </button>
+        <div v-if="shareCopy" class="flex shrink-0 items-center gap-2">
+          <label class="relative flex items-center">
+            <Languages class="pointer-events-none absolute left-2.5 size-3.5 text-surface-500 dark:text-surface-400" />
+            <span class="sr-only">Language of the share posts</span>
+            <select
+              :value="shareLanguageCode"
+              :disabled="isGenerating"
+              class="appearance-none rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 py-1.5 pl-8 pr-3 text-xs font-medium text-surface-600 dark:text-surface-400 outline-none transition-colors hover:bg-surface-50 dark:hover:bg-surface-800 focus:border-brand-500 focus:ring-2 focus:ring-brand-500 disabled:opacity-50"
+              @change="changeShareLanguage(($event.target as HTMLSelectElement).value)"
+            >
+              <option v-for="lang in SHARE_LANGUAGES" :key="lang.code" :value="lang.code">
+                {{ lang.label }}
+              </option>
+            </select>
+          </label>
+          <button
+            type="button"
+            :disabled="isGenerating"
+            class="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-surface-200 dark:border-surface-700 px-3 py-1.5 text-xs font-medium text-surface-600 dark:text-surface-400 transition-colors hover:bg-surface-50 dark:hover:bg-surface-800 disabled:opacity-50"
+            @click="loadShareCopy(true, shareLanguageCode)"
+          >
+            <RefreshCw class="size-3" :class="isGenerating ? 'animate-spin' : ''" />
+            Rewrite
+          </button>
+        </div>
       </div>
 
       <div class="p-5">
@@ -463,14 +564,29 @@ onMounted(() => {
           <p class="mb-4 text-sm text-surface-500 dark:text-surface-400">
             Write posts for LinkedIn, X, Facebook, WhatsApp, Reddit and your team.
           </p>
-          <button
-            type="button"
-            class="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-brand-700"
-            @click="loadShareCopy(false)"
-          >
-            <Sparkles class="size-4" />
-            Write my posts
-          </button>
+          <div class="flex flex-wrap items-center justify-center gap-2">
+            <label class="relative flex items-center">
+              <Languages class="pointer-events-none absolute left-3 size-4 text-surface-500 dark:text-surface-400" />
+              <span class="sr-only">Language of the share posts</span>
+              <select
+                v-model="shareLanguageCode"
+                class="appearance-none rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 py-2.5 pl-9 pr-4 text-sm font-medium text-surface-600 dark:text-surface-400 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500"
+                @change="shareLanguageChosen = true"
+              >
+                <option v-for="lang in SHARE_LANGUAGES" :key="lang.code" :value="lang.code">
+                  {{ lang.label }}
+                </option>
+              </select>
+            </label>
+            <button
+              type="button"
+              class="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-brand-700"
+              @click="loadShareCopy(false, shareLanguageChosen ? shareLanguageCode : undefined)"
+            >
+              <Sparkles class="size-4" />
+              Write my posts
+            </button>
+          </div>
           <p v-if="shareError" class="mt-3 text-xs text-danger-600 dark:text-danger-400">
             {{ shareError }}
           </p>
@@ -493,8 +609,15 @@ onMounted(() => {
               <span class="text-sm font-semibold text-surface-900 dark:text-surface-100">{{ ch.label }}</span>
             </div>
 
-            <p class="mb-3 flex-1 whitespace-pre-line text-xs leading-relaxed text-surface-600 dark:text-surface-400">
+            <p class="flex-1 whitespace-pre-line text-xs leading-relaxed text-surface-600 dark:text-surface-400">
               {{ shareCopy[ch.key] }}
+            </p>
+
+            <p class="mb-3 mt-2 text-xs leading-relaxed text-surface-600 dark:text-surface-400">
+              {{ applyCta }}
+              <span class="block truncate font-mono text-[11px] text-brand-600 dark:text-brand-400" :title="attachedUrl(ch.key)">
+                {{ attachedUrl(ch.key) }}
+              </span>
             </p>
 
             <div class="flex items-center gap-2">
@@ -510,8 +633,10 @@ onMounted(() => {
               </button>
               <button
                 type="button"
-                class="inline-flex items-center gap-1 rounded-lg border border-surface-200 dark:border-surface-700 px-3 py-2 text-xs font-medium text-surface-600 dark:text-surface-400 transition-colors hover:bg-white dark:hover:bg-surface-800"
-                @click="copy(`copy-${ch.key}`, shareCopy[ch.key] ?? '')"
+                class="inline-flex items-center gap-1 rounded-lg border border-surface-200 dark:border-surface-700 px-3 py-2 text-xs font-medium text-surface-600 dark:text-surface-400 transition-colors hover:bg-white dark:hover:bg-surface-800 disabled:opacity-50"
+                :disabled="mintingChannel === SHARE_CHANNEL_SOURCE[ch.key]"
+                :aria-label="`Copy the ${ch.label} post with its application link`"
+                @click="copyPost(ch)"
               >
                 <Check v-if="copiedKey === `copy-${ch.key}`" class="size-3" />
                 <Copy v-else class="size-3" />

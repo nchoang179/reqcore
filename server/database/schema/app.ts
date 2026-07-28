@@ -154,6 +154,8 @@ export const job = pgTable('job', {
   shareCopy: jsonb('share_copy').$type<{
     channels: Record<string, string>
     generatedAt: string
+    /** `SHARE_LANGUAGES` code it was written in; absent on copy cached before the picker existed. */
+    language?: string
   }>(),
   // ── Application form settings ──
   phoneRequirement: text('phone_requirement').$type<'hidden' | 'optional' | 'required'>().notNull().default('optional'),

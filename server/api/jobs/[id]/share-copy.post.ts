@@ -7,6 +7,7 @@ import { assertPlatformBudget, BudgetExceededError, budgetErrorToHttp } from '..
 import { computeCostUsdMicros } from '../../../utils/ai/pricing'
 import { captureAiGeneration } from '../../../utils/ai/observability'
 import { createRateLimiter } from '../../../utils/rateLimit'
+import { SHARE_LANGUAGE_AUTO, SHARE_LANGUAGE_CODES, shareLanguage } from '../../../../shared/share-languages'
 
 const limiter = createRateLimiter({
   windowMs: 60_000,
@@ -26,7 +27,16 @@ export default defineEventHandler(async (event) => {
   const orgId = session.session.activeOrganizationId
 
   const { id } = await getValidatedRouterParams(event, idParamSchema.parse)
-  const body = await readBody<{ regenerate?: boolean }>(event).catch((): { regenerate?: boolean } => ({}))
+  const body = await readBody<{ regenerate?: boolean; language?: string }>(event)
+    .catch((): { regenerate?: boolean; language?: string } => ({}))
+
+  // The language name is interpolated into the system prompt, so it may only
+  // ever be one this server put in the list.
+  if (body?.language !== undefined && !SHARE_LANGUAGE_CODES.includes(body.language)) {
+    throw createError({ statusCode: 400, statusMessage: 'Unsupported share language' })
+  }
+
+  const requestedLanguage = body?.language
 
   const found = await db.query.job.findFirst({
     where: and(eq(job.id, id), eq(job.organizationId, orgId)),
@@ -50,9 +60,20 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 404, statusMessage: 'Job not found' })
   }
 
-  if (found.shareCopy && !body?.regenerate) {
-    return { ...found.shareCopy, source: 'cache' as const }
+  // An omitted language means "whatever you have" — the tab opening must never
+  // bill a generation just because the cached copy is in a language other than
+  // the picker's default. Only an explicit, different pick regenerates.
+  const cachedLanguage = found.shareCopy?.language ?? SHARE_LANGUAGE_AUTO
+
+  if (
+    found.shareCopy
+    && !body?.regenerate
+    && (requestedLanguage === undefined || requestedLanguage === cachedLanguage)
+  ) {
+    return { language: cachedLanguage, ...found.shareCopy, source: 'cache' as const }
   }
+
+  const language = requestedLanguage ?? cachedLanguage
 
   if (!found.description) {
     throw createError({
@@ -91,6 +112,7 @@ export default defineEventHandler(async (event) => {
       location: found.location,
       remoteStatus: found.remoteStatus,
       salaryHint,
+      languageName: shareLanguage(language).promptName || null,
     })
   } catch {
     captureAiGeneration({
@@ -131,6 +153,7 @@ export default defineEventHandler(async (event) => {
   const payload = {
     channels: result.copy as unknown as Record<string, string>,
     generatedAt: new Date().toISOString(),
+    language,
   }
 
   await db.update(job)
