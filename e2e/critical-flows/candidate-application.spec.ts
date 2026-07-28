@@ -1,4 +1,11 @@
-import { test, expect, declineAnalyticsConsent, getPublishedApplicationLink } from '../fixtures'
+import {
+  test,
+  expect,
+  declineAnalyticsConsent,
+  getPublishedApplicationLink,
+  publishableDescription,
+  selectJobLocation,
+} from '../fixtures'
 
 /**
  * Critical flow: Candidate applies to a published job that contains every
@@ -20,8 +27,9 @@ import { test, expect, declineAnalyticsConsent, getPublishedApplicationLink } fr
  */
 
 const JOB_TITLE = 'Frontend Developer — All Fields Test'
-const JOB_DESCRIPTION = 'Join our team building modern web applications with Vue and Nuxt.'
-const JOB_LOCATION = 'Berlin, Germany'
+const JOB_DESCRIPTION = publishableDescription(
+  'Join our team building modern web applications with Vue and Nuxt.',
+)
 
 // Applicant identity is generated inside the test to guarantee uniqueness
 // across retries (Playwright can retry up to 2× in CI; a static email would
@@ -146,7 +154,7 @@ test.describe('Candidate Application Flow — All Custom Question Field Types', 
     await page.getByLabel('Job title').waitFor({ state: 'visible', timeout: 15_000 })
     await page.getByLabel('Job title').fill(JOB_TITLE)
     await page.locator('textarea').first().fill(JOB_DESCRIPTION)
-    await page.getByLabel('Location').fill(JOB_LOCATION)
+    await selectJobLocation(page)
 
     // Step 1 → Step 2 (scope to form to avoid the duplicate header button)
     await page.locator('form').getByRole('button', { name: 'Save & continue' }).first().waitFor({ state: 'attached', timeout: 10_000 })
@@ -497,8 +505,8 @@ test.describe('Candidate Application — Required Cover Letter Validation', () =
     await page.waitForLoadState('networkidle')
     await page.getByLabel('Job title').waitFor({ state: 'visible', timeout: 15_000 })
     await page.getByLabel('Job title').fill('Cover Letter Required Job')
-    await page.locator('textarea').first().fill('A job that requires a cover letter.')
-    await page.getByLabel('Location').fill('Remote')
+    await page.locator('textarea').first().fill(publishableDescription('A job that requires a cover letter.'))
+    await selectJobLocation(page)
 
     // Step 1 → Step 2
     await page.locator('form').getByRole('button', { name: 'Save & continue' }).first()

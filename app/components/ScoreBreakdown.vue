@@ -57,6 +57,14 @@ watch(scoreData, (val) => {
 
 const resolvedScoreData = computed(() => scoreData.value ?? cachedScoreData.value)
 const hasScores = computed(() => (resolvedScoreData.value?.scores?.length ?? 0) > 0)
+
+// The application's own score is the composite of record — an analysis run is
+// not the only thing that writes it. Sample applicants on a test job ship with
+// scores already written and no run behind them, so reading the composite off
+// `latestRun` alone would show a dash next to a full criterion breakdown.
+const compositeScore = computed(
+  () => resolvedScoreData.value?.compositeScore ?? resolvedScoreData.value?.latestRun?.compositeScore ?? null,
+)
 const isInitialLoad = computed(() => status.value === 'pending' && !cachedScoreData.value)
 
 function scoreColor(score: number, max: number): string {
@@ -210,9 +218,9 @@ async function retryParse() {
         <div class="flex items-baseline gap-2">
           <span
             class="text-3xl font-bold tabular-nums"
-            :class="scoreColor(resolvedScoreData!.latestRun?.compositeScore ?? 0, 100)"
+            :class="scoreColor(compositeScore ?? 0, 100)"
           >
-            {{ resolvedScoreData!.latestRun?.compositeScore ?? '—' }}
+            {{ compositeScore ?? '—' }}
           </span>
           <span class="text-sm text-surface-400">/ 100</span>
         </div>

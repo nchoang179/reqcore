@@ -765,6 +765,17 @@ function mapUtmToChannel(utmSource: string | undefined): string | null {
     newsletter: 'email',
     event: 'event',
     agency: 'agency',
+    whatsapp: 'whatsapp',
+    // Aggregators fed by /jobs.xml. These values are the ones the feed stamps
+    // into each job URL as utm_source, so they must round-trip exactly.
+    jooble: 'jooble',
+    adzuna: 'adzuna',
+    careerjet: 'careerjet',
+    talent_com: 'talent_com',
+    'talent.com': 'talent_com',
+    jobsora: 'jobsora',
+    jora: 'jora',
+    whatjobs: 'whatjobs',
   }
   return mapping[source] ?? null
 }
@@ -798,6 +809,16 @@ function mapReferrerToChannel(domain: string | null): string | null {
     'instagram.com': 'instagram',
     'tiktok.com': 'tiktok',
     'reddit.com': 'reddit',
+    'whatsapp.com': 'whatsapp',
+    // Aggregator referrers — a fallback for when a board strips the feed's utm
+    // parameters from the outbound link, which several of them do.
+    'jooble.org': 'jooble',
+    'adzuna.com': 'adzuna',
+    'careerjet.com': 'careerjet',
+    'talent.com': 'talent_com',
+    'jobsora.com': 'jobsora',
+    'jora.com': 'jora',
+    'whatjobs.com': 'whatjobs',
   }
   // Check for exact match first, then suffix match for subdomains
   if (mapping[d]) return mapping[d]!

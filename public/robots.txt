@@ -1,6 +1,7 @@
 User-Agent: *
 Allow: /jobs
 Allow: /jobs/
+Allow: /jobs.xml
 Allow: /career/
 Disallow: /dashboard/
 Disallow: /auth/

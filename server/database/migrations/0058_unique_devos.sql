@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "job_one_test_per_org_idx" ON "job" USING btree ("organization_id") WHERE "job"."is_test";

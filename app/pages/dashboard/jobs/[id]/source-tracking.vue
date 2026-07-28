@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Radio, Plus, Copy, CheckCircle2, XCircle, ToggleLeft, ToggleRight, Trash2, ChevronDown, X } from 'lucide-vue-next'
+import { sourceChannelLabel } from '~~/shared/source-channels'
 
 definePageMeta({
   layout: 'dashboard',
@@ -40,21 +41,7 @@ const newLink = ref({
   utmCampaign: '',
 })
 
-const channelLabels: Record<string, string> = {
-  linkedin: 'LinkedIn', indeed: 'Indeed', glassdoor: 'Glassdoor',
-  ziprecruiter: 'ZipRecruiter', monster: 'Monster', handshake: 'Handshake',
-  angellist: 'AngelList', wellfound: 'Wellfound', dice: 'Dice',
-  stackoverflow: 'Stack Overflow', weworkremotely: 'We Work Remotely',
-  remoteok: 'Remote OK', builtin: 'Built In', hired: 'Hired',
-  google_jobs: 'Google Jobs', facebook: 'Facebook', twitter: 'X / Twitter',
-  instagram: 'Instagram', tiktok: 'TikTok', reddit: 'Reddit',
-  referral: 'Referral', career_site: 'Career Site', email: 'Email',
-  event: 'Event', agency: 'Agency', direct: 'Direct', other: 'Other', custom: 'Custom',
-}
-
-function getChannelLabel(channel: string) {
-  return channelLabels[channel] ?? channel
-}
+const getChannelLabel = sourceChannelLabel
 
 async function handleCreateLink() {
   if (!newLink.value.name.trim()) return

@@ -171,3 +171,7 @@ Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) before
 ## Licensing & self-hosting
 
 Reqcore is licensed under the [GNU Affero General Public License v3.0](LICENSE), with the exception of the [`ee/`](ee) directory, which contains paid, cloud-only features under a separate [commercial license](ee/LICENSE). See [SELF-HOSTING.md](SELF-HOSTING.md) for what that means if you run your own instance.
+
+### Third-party data
+
+The bundled place data used by the job-location picker (`server/utils/geo/data/`) is derived from [GeoNames](https://www.geonames.org), licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Regenerate it with `npx tsx server/scripts/generate-geo-dataset.ts`.

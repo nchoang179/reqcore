@@ -64,11 +64,14 @@ export async function resolveOrgPlanId(orgId: string): Promise<BillingTier> {
 }
 
 /** Count an org's currently-open roles (jobs with status 'open'). */
+// Test roles are excluded: they exist so someone can try the product, and
+// billing them against the cap would make the walkthrough consume a free
+// workspace's only slot.
 async function countOpenJobs(orgId: string): Promise<number> {
   const [row] = await db
     .select({ total: sql<string>`count(*)` })
     .from(job)
-    .where(and(eq(job.organizationId, orgId), eq(job.status, 'open')))
+    .where(and(eq(job.organizationId, orgId), eq(job.status, 'open'), eq(job.isTest, false)))
   return Number(row?.total ?? 0)
 }
 
@@ -110,6 +113,51 @@ export async function assertActiveRoleLimit(orgId: string): Promise<void> {
         `Your plan allows ${limit} open role${limit === 1 ? '' : 's'} at a time. ` +
         `Close a role or upgrade to open more.`,
       data: { code: 'ACTIVE_ROLE_LIMIT', tier, limit },
+    })
+  }
+}
+
+/** The partial unique index that makes the one-test-role-per-org rule airtight. */
+const TEST_ROLE_UNIQUE_INDEX = 'job_one_test_per_org_idx'
+
+/**
+ * Whether a failed insert was Postgres refusing a second test role.
+ *
+ * `assertTestRoleLimit` wins the common case, but it is a check-then-insert:
+ * concurrent creates both pass it and one hits the index instead. The loser
+ * should get the same 409 as everyone else rather than a 500.
+ */
+export function isDuplicateTestRoleError(error: unknown): boolean {
+  const pgError = error as { code?: string, constraint_name?: string } | null
+  return pgError?.code === '23505' && pgError.constraint_name === TEST_ROLE_UNIQUE_INDEX
+}
+
+/**
+ * Assert the org may create a test role — i.e. that it has none already.
+ *
+ * A test role is exempt from the active-role cap (see `countOpenJobs`), and it
+ * is otherwise a fully working job: public at `/jobs/<slug>`, taking real
+ * applications, auto-scoring them. So the exemption itself has to be capped, or
+ * `/dashboard/jobs/new?mode=test` is an unlimited supply of free open roles on a
+ * product priced per active role.
+ *
+ * One is all the walkthrough needs, and the entry point is only offered to an
+ * org with no jobs at all. Deleting the test role frees the slot, which is the
+ * intended way to run the tour again. The `job_one_test_per_org_idx` index backs
+ * this up in the database, where a concurrent second create cannot slip past.
+ */
+export async function assertTestRoleLimit(orgId: string): Promise<void> {
+  const [existing] = await db
+    .select({ id: job.id })
+    .from(job)
+    .where(and(eq(job.organizationId, orgId), eq(job.isTest, true)))
+    .limit(1)
+
+  if (existing) {
+    throw createError({
+      statusCode: 409,
+      statusMessage: 'You already have a test job. Delete it before creating another.',
+      data: { code: 'TEST_ROLE_EXISTS', jobId: existing.id },
     })
   }
 }

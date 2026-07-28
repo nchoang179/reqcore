@@ -6,7 +6,7 @@ import {
   ChevronDown, Menu, X, Users, ChevronLeft,
   LayoutDashboard, Calendar, ArrowUpCircle,
   Sparkles, Radio, History,
-  MessageCircle, Languages, Lock, Inbox, Upload, Zap,
+  MessageCircle, Languages, Lock, Inbox, Upload, Zap, Megaphone,
 } from 'lucide-vue-next'
 import type { PlanFeature } from '~~/shared/billing'
 
@@ -107,6 +107,7 @@ const jobTabs = computed(() => {
   const base = `/dashboard/jobs/${activeJobId.value}`
   return [
     { label: 'Pipeline', to: base, icon: Kanban, exact: true },
+    { label: 'Promote', to: `${base}/promote`, icon: Megaphone, exact: true },
     { label: 'Table', to: `${base}/candidates`, icon: Table2, exact: true },
     { label: 'Import', to: `${base}/import`, icon: Upload, exact: true },
     { label: 'Inbox', to: `${base}/inbox`, icon: Inbox, exact: true },
@@ -189,7 +190,10 @@ const newJobResetSignal = useState('new-job-reset-signal', () => 0)
 
 function handleNewJobClick() {
   const newJobPath = localePath('/dashboard/jobs/new')
-  if (route.path === newJobPath) {
+  // The test walkthrough sits on this same path under ?mode=test. From there
+  // this button has to navigate, so the query — and the sample role it fills
+  // the wizard with — is actually dropped.
+  if (route.path === newJobPath && !route.query.mode) {
     // Already on the page: signal the wizard to reset instead of navigating
     newJobResetSignal.value++
   } else {

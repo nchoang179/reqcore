@@ -12,8 +12,9 @@ export default defineEventHandler(async (event) => {
 
   const offset = (query.page - 1) * query.limit
 
-  // Always filter to open jobs only
-  const conditions = [eq(job.status, 'open')]
+  // Open jobs only, and never a test role — the public board is the surface
+  // people were cluttering by evaluating the product in a real workspace.
+  const conditions = [eq(job.status, 'open'), eq(job.isTest, false)]
 
   // Optional search — matches title OR location
   if (query.search) {

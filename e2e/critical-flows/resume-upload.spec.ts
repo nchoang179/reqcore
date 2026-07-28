@@ -1,5 +1,12 @@
 import { type Browser } from '@playwright/test'
-import { test, expect, declineAnalyticsConsent, getPublishedApplicationLink } from '../fixtures'
+import {
+  test,
+  expect,
+  declineAnalyticsConsent,
+  getPublishedApplicationLink,
+  publishableDescription,
+  selectJobLocation,
+} from '../fixtures'
 import {
   VALID_FILE_CONFIGS,
   INVALID_FILE_CONFIGS,
@@ -26,8 +33,7 @@ import {
  */
 
 const JOB_TITLE = 'File Upload Format Test'
-const JOB_DESCRIPTION = 'Testing all supported document upload formats.'
-const JOB_LOCATION = 'Remote'
+const JOB_DESCRIPTION = publishableDescription('Testing all supported document upload formats.')
 
 let applicationLink = ''
 let jobSlug = ''
@@ -130,7 +136,7 @@ test.describe('Resume Upload — All File Formats', () => {
     await page.getByLabel('Job title').waitFor({ state: 'visible', timeout: 15_000 })
     await page.getByLabel('Job title').fill(JOB_TITLE)
     await page.locator('textarea').first().fill(JOB_DESCRIPTION)
-    await page.getByLabel('Location').fill(JOB_LOCATION)
+    await selectJobLocation(page)
 
     await page.locator('form').getByRole('button', { name: 'Save & continue' }).first()
       .waitFor({ state: 'attached', timeout: 10_000 })

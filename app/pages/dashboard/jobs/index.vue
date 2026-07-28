@@ -2,7 +2,7 @@
 import {
   Briefcase, Bell, Kanban,
   MapPin, Search, SlidersHorizontal, X,
-  LayoutGrid, List, Table2, ArrowUp, ArrowDown, ArrowUpDown,
+  LayoutGrid, List, Table2, ArrowUp, ArrowDown, ArrowUpDown, Megaphone,
 } from 'lucide-vue-next'
 
 definePageMeta({
@@ -181,6 +181,16 @@ const statusPriority: Record<string, number> = {
 
 function totalActive(pipeline: any) {
   return (pipeline?.new ?? 0) + (pipeline?.screening ?? 0) + (pipeline?.interview ?? 0) + (pipeline?.offer ?? 0) + (pipeline?.hired ?? 0)
+}
+
+/**
+ * Whether a job has never received an application. Unlike `totalActive`, this
+ * counts rejected candidates — a role that rejected five people has a
+ * pipeline problem, not a distribution problem, and shouldn't be nudged to
+ * promote itself.
+ */
+function hasNoApplicants(pipeline: any) {
+  return totalActive(pipeline) + (pipeline?.rejected ?? 0) === 0
 }
 
 const sortedJobs = computed(() => {
@@ -675,12 +685,14 @@ const noResults = computed(() => !isEmpty.value && filteredJobs.value.length ===
                     >
                       {{ j.title }}
                     </NuxtLink>
+                    <TestJobBadge v-if="j.isTest" />
                     <span
                       v-if="(j.pipeline?.new ?? 0) > 0"
                       class="inline-flex items-center justify-center rounded-full bg-warning-100 dark:bg-warning-900/40 text-warning-700 dark:text-warning-400 text-[10px] font-bold px-1.5 py-0.5 shrink-0"
                     >
                       {{ j.pipeline.new }} new
                     </span>
+                    <DeleteTestJobButton v-if="j.isTest" :job-id="j.id" class="ml-auto" />
                   </div>
                 </td>
                 <td class="px-4 py-3">
@@ -747,12 +759,15 @@ const noResults = computed(() => !isEmpty.value && filteredJobs.value.length ===
               <span class="font-semibold text-sm text-surface-900 dark:text-surface-100 group-hover:text-brand-600 dark:group-hover:text-brand-400 transition-colors line-clamp-2 leading-snug">
                 {{ j.title }}
               </span>
-              <span
-                class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium shrink-0 capitalize mt-0.5"
-                :class="statusBadgeClasses[j.status] ?? 'bg-surface-100 text-surface-600'"
-              >
-                {{ j.status }}
-              </span>
+              <div class="flex items-center gap-1.5 shrink-0 mt-0.5">
+                <TestJobBadge v-if="j.isTest" />
+                <span
+                  class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium shrink-0 capitalize"
+                  :class="statusBadgeClasses[j.status] ?? 'bg-surface-100 text-surface-600'"
+                >
+                  {{ j.status }}
+                </span>
+              </div>
             </div>
 
             <!-- Meta: type + location -->
@@ -762,6 +777,7 @@ const noResults = computed(() => !isEmpty.value && filteredJobs.value.length ===
                 <MapPin class="size-3 shrink-0" />
                 {{ j.location }}
               </span>
+              <DeleteTestJobButton v-if="j.isTest" :job-id="j.id" class="ml-auto" />
             </div>
 
             <!-- Pipeline mini-stats -->
@@ -794,6 +810,23 @@ const noResults = computed(() => !isEmpty.value && filteredJobs.value.length ===
               <span class="inline-flex items-center gap-1 text-xs text-brand-600 dark:text-brand-400 font-medium">
                 <Kanban class="size-3" />
                 Review
+              </span>
+            </div>
+
+            <!-- An open role with nothing in the pipeline is the dead end this
+                 view used to leave the user at. The card links to the pipeline,
+                 which carries the actual "Promote this job" action — a nested
+                 link here would be invalid markup. -->
+            <div
+              v-else-if="j.status === 'open' && hasNoApplicants(j.pipeline)"
+              class="flex items-center justify-between gap-2 -mx-4 -mb-4 px-4 py-2 rounded-b-xl bg-surface-50 dark:bg-surface-800/40 border-t border-surface-100 dark:border-surface-800"
+            >
+              <span class="text-xs text-surface-500 dark:text-surface-400">
+                No applicants yet
+              </span>
+              <span class="inline-flex items-center gap-1 text-xs font-medium text-brand-600 dark:text-brand-400">
+                <Megaphone class="size-3" />
+                Promote
               </span>
             </div>
           </NuxtLink>
@@ -839,6 +872,8 @@ const noResults = computed(() => !isEmpty.value && filteredJobs.value.length ===
                       >
                         {{ j.status }}
                       </span>
+                      <TestJobBadge v-if="j.isTest" />
+                      <DeleteTestJobButton v-if="j.isTest" :job-id="j.id" class="ml-auto" />
                     </div>
                     <div class="flex items-center gap-3 text-xs text-surface-400">
                       <span>{{ typeLabels[j.type] ?? j.type }}</span>
@@ -918,6 +953,8 @@ const noResults = computed(() => !isEmpty.value && filteredJobs.value.length ===
                 >
                   {{ j.status }}
                 </span>
+                <TestJobBadge v-if="j.isTest" />
+                <DeleteTestJobButton v-if="j.isTest" :job-id="j.id" class="ml-auto" />
               </div>
               <div class="flex items-center gap-3 text-xs text-surface-400 mb-3">
                 <span>{{ typeLabels[j.type] ?? j.type }}</span>

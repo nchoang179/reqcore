@@ -51,7 +51,9 @@ export default defineEventHandler(async (event) => {
   }
 
   const jobs = await db.query.job.findMany({
-    where: and(eq(job.organizationId, org.id), eq(job.status, 'open')),
+    // A test role stays out of the org's branded careers page too — that page
+    // is shown to real candidates.
+    where: and(eq(job.organizationId, org.id), eq(job.status, 'open'), eq(job.isTest, false)),
     orderBy: [desc(job.createdAt)],
     columns: {
       id: true,
