@@ -299,6 +299,15 @@ async function generateAiCriteria() {
  */
 const autoCriteriaState = ref<'idle' | 'running' | 'done' | 'failed'>('idle')
 
+/**
+ * The writing happens while the user is still on step 2, so without this the
+ * finished rubric is simply sitting there when step 3 opens, with nothing to
+ * say it was read out of their job description. The list fades in card by card
+ * on that first arrival instead of appearing whole.
+ */
+const criteriaRevealPending = ref(false)
+const criteriaRevealing = ref(false)
+
 async function autoGenerateCriteria() {
   if (autoCriteriaState.value !== 'idle') return
   // A restored draft, the sample role, or a set already chosen all arrive with
@@ -337,6 +346,7 @@ async function autoGenerateCriteria() {
     scoringCriteria.value = generated
     scoringMode.value = 'ai'
     autoCriteriaState.value = 'done'
+    criteriaRevealPending.value = true
     track('ai_criteria_generated', { criteria_count: generated.length, auto: true })
   } catch {
     // Nobody asked for this, so nothing is said about it failing. Step 3 falls
@@ -357,6 +367,15 @@ async function autoGenerateCriteria() {
 watch(currentStep, (step) => {
   if (step >= 2 && step <= 3) autoGenerateCriteria()
 })
+
+/** Plays the fade-in once, whenever step 3 is first opened with written criteria. */
+watch([currentStep, criteriaRevealPending], () => {
+  if (currentStep.value !== 3 || !criteriaRevealPending.value) return
+  criteriaRevealPending.value = false
+  if (import.meta.client && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+  criteriaRevealing.value = true
+  setTimeout(() => { criteriaRevealing.value = false }, 1200)
+}, { flush: 'post' })
 
 function addCustomCriterion() {
   const f = customCriterionForm.value
@@ -996,7 +1015,12 @@ const typeOptions = [
                     : 'bg-white dark:bg-surface-900 text-surface-400 dark:text-surface-500 border-surface-200 dark:border-surface-800'
               ]"
             >
-              <span v-if="currentStep > step.id" class="text-xs">&#10003;</span>
+              <!-- Step 3 is being written in the background while you fill in step 2. -->
+              <Loader2
+                v-if="step.id === 3 && currentStep !== 3 && autoCriteriaState === 'running'"
+                class="size-3 animate-spin text-brand-500 dark:text-brand-400"
+              />
+              <span v-else-if="currentStep > step.id" class="text-xs">&#10003;</span>
               <span v-else>{{ step.id }}</span>
             </div>
             <span
@@ -1223,6 +1247,25 @@ const typeOptions = [
                 :job-title="form.title"
                 :show-preview="false"
               />
+
+              <!--
+                One line, no card: the scoring step is being written from the job
+                description while this step is open, so it does not arrive
+                unexplained.
+              -->
+              <p
+                v-if="autoCriteriaState === 'running' || autoCriteriaState === 'done'"
+                class="mt-8 flex items-center gap-2 text-xs text-surface-500 dark:text-surface-400"
+              >
+                <template v-if="autoCriteriaState === 'running'">
+                  <Loader2 class="size-3.5 shrink-0 animate-spin text-brand-500 dark:text-brand-400" />
+                  AI is reading your job description to write scoring criteria for step 3.
+                </template>
+                <template v-else>
+                  <Sparkles class="size-3.5 shrink-0 text-brand-500 dark:text-brand-400" />
+                  Scoring criteria written from your job description — review them in step 3.
+                </template>
+              </p>
             </section>
 
             <!-- Step 3: AI scoring criteria -->
@@ -1472,21 +1515,28 @@ const typeOptions = [
                       <ArrowLeft class="size-3.5" />
                       Back to options
                     </button>
-                    <h3 class="text-sm font-semibold text-surface-800 dark:text-surface-200">
-                      {{ scoringCriteria.length }} {{ scoringCriteria.length === 1 ? 'criterion' : 'criteria' }} configured
-                    </h3>
+                    <div class="flex items-center gap-2">
+                      <!-- Where the list came from, in the row that was already there. -->
+                      <span
+                        v-if="autoCriteriaState === 'done'"
+                        class="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-semibold text-brand-700 ring-1 ring-inset ring-brand-200 dark:bg-brand-950/60 dark:text-brand-300 dark:ring-brand-800"
+                        title="AI read your job description and wrote these criteria. Edit the weights, remove any that don't fit, or use “Back to options” for a template instead."
+                      >
+                        <Sparkles class="size-3" />
+                        Written by AI from your description
+                      </span>
+                      <h3 class="text-sm font-semibold text-surface-800 dark:text-surface-200">
+                        {{ scoringCriteria.length }} {{ scoringCriteria.length === 1 ? 'criterion' : 'criteria' }} configured
+                      </h3>
+                    </div>
                   </div>
 
-                  <p v-if="autoCriteriaState === 'done'" class="flex items-center gap-1.5 text-xs text-surface-500 dark:text-surface-400">
-                    <Sparkles class="size-3.5 text-brand-500 dark:text-brand-400 shrink-0" />
-                    Written from your job description. Adjust the weights, or use "Back to options" for a template instead.
-                  </p>
-
-                  <div class="space-y-3">
+                  <div class="space-y-3" :class="criteriaRevealing && 'criteria-reveal'">
                     <div
-                      v-for="criterion in scoringCriteria"
+                      v-for="(criterion, criterionIndex) in scoringCriteria"
                       :key="criterion.key"
                       class="rounded-xl border border-surface-200 dark:border-surface-800 bg-white dark:bg-surface-950 p-4 transition-all hover:shadow-sm"
+                      :style="criteriaRevealing ? { animationDelay: `${Math.min(criterionIndex, 8) * 70}ms` } : undefined"
                     >
                       <div class="flex items-start justify-between gap-3 mb-3">
                         <div class="flex-1 min-w-0">
@@ -1994,6 +2044,32 @@ button:not(:disabled) {
 
 @media (prefers-reduced-motion: reduce) {
   .sample-reveal :deep(section) {
+    animation: none;
+  }
+}
+
+/*
+ * Step 3's criteria are written while step 2 is open, so they would otherwise be
+ * sitting there fully formed on arrival. Each card settles in one after the
+ * other instead — opacity and a few pixels, nothing that blocks editing.
+ */
+.criteria-reveal > * {
+  animation: criteria-reveal 340ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes criteria-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .criteria-reveal > * {
     animation: none;
   }
 }
