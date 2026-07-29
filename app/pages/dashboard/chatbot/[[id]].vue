@@ -473,7 +473,7 @@ async function startNew() {
                   v-if="m.content"
                   class="px-1 py-1 text-sm text-surface-800 dark:text-surface-200"
                 >
-                  <MarkdownDescription :value="m.content" />
+                  <MarkdownDescription :value="m.content" dense />
                 </div>
                 <div
                   v-else-if="isStreaming && m.id === messages[messages.length - 1]?.id"

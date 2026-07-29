@@ -154,6 +154,240 @@
   }
 }
 
+/* ── Rendered markdown (job descriptions, chat replies) ──
+   Owned outright rather than layered on @tailwindcss/typography:
+   `prose` + `dark:prose-invert` derives its dark palette from its own
+   grays, which drifts from the surface ramp above, and every fix has to
+   be spent as another prose-* utility on the element. The content here
+   is recruiter-pasted and unpredictable, so each tag it can produce is
+   given an explicit look in both modes. See MarkdownDescription.vue. */
+.job-prose {
+  font-size: 0.9375rem;
+  line-height: 1.7;
+  color: var(--color-surface-600);
+  /* Pasted URLs are routinely longer than a phone viewport is wide. */
+  overflow-wrap: break-word;
+}
+.dark .job-prose {
+  color: var(--color-surface-300);
+}
+
+.job-prose > :first-child { margin-top: 0; }
+.job-prose > :last-child { margin-bottom: 0; }
+
+.job-prose p {
+  margin: 0.875rem 0;
+}
+
+.job-prose h1,
+.job-prose h2,
+.job-prose h3,
+.job-prose h4,
+.job-prose h5,
+.job-prose h6 {
+  margin: 1.75rem 0 0.625rem;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -0.011em;
+  color: var(--color-surface-900);
+  text-wrap: balance;
+}
+.dark .job-prose :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--color-surface-50);
+}
+
+/* Descriptions sit under the page's own <h1>, so the largest heading a
+   recruiter can type is capped just above body size instead of competing
+   with the job title. */
+.job-prose h1 { font-size: 1.1875rem; }
+.job-prose h2 { font-size: 1.0625rem; }
+.job-prose :is(h3, h4, h5, h6) { font-size: 0.9375rem; }
+
+.job-prose strong {
+  font-weight: 600;
+  color: var(--color-surface-900);
+}
+.dark .job-prose strong {
+  color: var(--color-surface-100);
+}
+
+.job-prose a {
+  color: var(--color-brand-600);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+  text-decoration-color: color-mix(in oklch, var(--color-brand-600) 35%, transparent);
+  transition: color 0.15s ease, text-decoration-color 0.15s ease;
+}
+.job-prose a:hover {
+  color: var(--color-brand-700);
+  text-decoration-color: currentColor;
+}
+.dark .job-prose a { color: var(--color-brand-400); }
+.dark .job-prose a:hover { color: var(--color-brand-300); }
+
+/* Headings that are entirely a link keep the heading's own look. */
+.job-prose :is(h1, h2, h3, h4, h5, h6) a {
+  color: inherit;
+  font: inherit;
+  text-decoration: none;
+}
+
+.job-prose :is(ul, ol) {
+  margin: 0.875rem 0;
+  padding: 0;
+  list-style: none;
+}
+.job-prose li {
+  position: relative;
+  margin: 0.5rem 0;
+  padding-left: 1.5rem;
+}
+.job-prose :is(li > ul, li > ol) {
+  margin: 0.5rem 0;
+}
+/* Loose lists (blank lines between items) wrap each item in a <p>, which
+   would otherwise inherit full paragraph spacing inside the bullet. */
+.job-prose li p { margin: 0.375rem 0; }
+.job-prose li > p:first-child { margin-top: 0; }
+.job-prose li > p:last-child { margin-bottom: 0; }
+
+/* Markers are drawn rather than inherited so bullet size, color and optical
+   alignment stay identical across nesting levels and both themes. */
+.job-prose ul > li::before {
+  content: "";
+  position: absolute;
+  left: 0.3125rem;
+  top: 0.6875rem;
+  width: 0.3125rem;
+  height: 0.3125rem;
+  border-radius: 9999px;
+  background: var(--color-brand-500);
+}
+.job-prose ul ul > li::before {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--color-brand-500);
+}
+.job-prose ol {
+  counter-reset: job-prose-ol;
+}
+.job-prose ol > li {
+  counter-increment: job-prose-ol;
+}
+.job-prose ol > li::before {
+  content: counter(job-prose-ol) ".";
+  position: absolute;
+  left: 0;
+  top: 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.85;
+  color: var(--color-brand-600);
+}
+.dark .job-prose ol > li::before { color: var(--color-brand-400); }
+
+.job-prose blockquote {
+  margin: 1.25rem 0;
+  padding: 0.125rem 0 0.125rem 1rem;
+  border-left: 2px solid var(--color-surface-200);
+  color: var(--color-surface-500);
+}
+.dark .job-prose blockquote {
+  border-left-color: var(--color-surface-700);
+  color: var(--color-surface-400);
+}
+
+.job-prose hr {
+  margin: 1.75rem 0;
+  border: 0;
+  border-top: 1px solid var(--color-surface-200);
+}
+.dark .job-prose hr { border-top-color: var(--color-surface-800); }
+
+.job-prose code {
+  padding: 0.125em 0.375em;
+  border-radius: 0.25rem;
+  background: var(--color-surface-100);
+  border: 1px solid var(--color-surface-200);
+  font-size: 0.875em;
+  color: var(--color-surface-800);
+}
+.dark .job-prose code {
+  background: var(--color-surface-800);
+  border-color: var(--color-surface-700);
+  color: var(--color-surface-200);
+}
+
+.job-prose pre {
+  margin: 1.25rem 0;
+  padding: 0.875rem 1rem;
+  border-radius: 0.75rem;
+  background: var(--color-surface-50);
+  border: 1px solid var(--color-surface-200);
+  overflow-x: auto;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
+.dark .job-prose pre {
+  background: var(--color-surface-900);
+  border-color: var(--color-surface-800);
+}
+.job-prose pre code {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-size: inherit;
+  color: inherit;
+}
+
+.job-prose table {
+  display: block;
+  overflow-x: auto;
+  width: 100%;
+  margin: 1.25rem 0;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+.job-prose :is(th, td) {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--color-surface-200);
+  text-align: left;
+}
+.job-prose th {
+  font-weight: 600;
+  background: var(--color-surface-50);
+  color: var(--color-surface-900);
+}
+.dark .job-prose :is(th, td) { border-color: var(--color-surface-800); }
+.dark .job-prose th {
+  background: var(--color-surface-900);
+  color: var(--color-surface-100);
+}
+
+.job-prose img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 0.75rem;
+}
+
+/* Dense: chat bubbles and other tight containers. */
+.job-prose-dense {
+  font-size: 0.875rem;
+  line-height: 1.65;
+}
+.job-prose-dense p { margin: 0.625rem 0; }
+.job-prose-dense :is(h1, h2, h3, h4, h5, h6) {
+  margin: 1.125rem 0 0.4375rem;
+  font-size: 0.875rem;
+}
+.job-prose-dense :is(ul, ol) { margin: 0.625rem 0; }
+.job-prose-dense li { margin: 0.3125rem 0; }
+.job-prose-dense ul > li::before { top: 0.5625rem; }
+.job-prose-dense ol > li::before { line-height: 1.75; }
+.job-prose-dense :is(pre, blockquote, table) { margin: 0.875rem 0; }
+.job-prose-dense hr { margin: 1.125rem 0; }
+
 /* ── Premium fade-in animations (Linear-style) ─────────── */
 
 /* Hero stagger: plays immediately on load with delay offsets */
