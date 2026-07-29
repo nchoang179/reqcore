@@ -25,11 +25,39 @@ if (_replicaCount > 1) {
  * @param windowMs - Time window in milliseconds
  * @param maxRequests - Maximum number of requests allowed within the window
  * @param message - Error message returned when the limit is exceeded
+ * @param countMode - What consumes a slot in the bucket (see below)
  */
 interface RateLimitConfig {
   windowMs: number
   maxRequests: number
   message?: string
+  countMode?: CountMode
+}
+
+/**
+ * What consumes a slot in a client's bucket.
+ *
+ * - `attempts` (default) — every request that reaches the limiter counts, and
+ *   is recorded before the handler runs. Right for endpoints where the attempt
+ *   itself is the cost (AI calls, sign-in guessing).
+ * - `successes` — the limiter only reads the bucket; the handler calls
+ *   `limiter.record(event)` once it knows the request succeeded. Rejected
+ *   requests — a wrong file type, a missing answer, a 413 — never consume a
+ *   slot, so a candidate cannot lock themselves out by fixing form errors.
+ */
+type CountMode = 'attempts' | 'successes'
+
+/**
+ * A rate limiter: call it to enforce the limit, and — in `successes` mode —
+ * call `record()` once the request is known to have succeeded.
+ */
+export interface RateLimiter {
+  (event: H3Event): Promise<void>
+  /**
+   * Count one request against the caller's bucket.
+   * No-op in `attempts` mode, where the check already recorded it.
+   */
+  record: (event: H3Event) => void
 }
 
 interface RateLimitEntry {
@@ -60,9 +88,26 @@ interface RateLimitEntry {
  *   // ... handler logic
  * })
  * ```
+ *
+ * @example Counting only successful requests
+ * ```ts
+ * const limiter = createRateLimiter({ windowMs: 60_000, maxRequests: 5, countMode: 'successes' })
+ *
+ * export default defineEventHandler(async (event) => {
+ *   await limiter(event)
+ *   // ... handler logic that may throw a 4xx
+ *   limiter.record(event)
+ *   return { success: true }
+ * })
+ * ```
  */
-export function createRateLimiter(config: RateLimitConfig) {
-  const { windowMs, maxRequests, message = 'Too many requests, please try again later' } = config
+export function createRateLimiter(config: RateLimitConfig): RateLimiter {
+  const {
+    windowMs,
+    maxRequests,
+    message = 'Too many requests, please try again later',
+    countMode = 'attempts',
+  } = config
   const store = new Map<string, RateLimitEntry>()
 
   // Periodically prune stale entries to prevent unbounded memory growth
@@ -79,27 +124,46 @@ export function createRateLimiter(config: RateLimitConfig) {
   }, PRUNE_INTERVAL).unref() // .unref() prevents the timer from keeping the process alive
 
   /**
+   * Read a client's bucket, dropping timestamps that have aged out.
+   *
+   * Returns undefined rather than an empty entry when nothing is left, so a
+   * flood of requests that never record (see `successes` mode) cannot grow the
+   * Map with one empty entry per client IP.
+   */
+  function peek(key: string, now: number): RateLimitEntry | undefined {
+    const entry = store.get(key)
+    if (!entry) return undefined
+
+    entry.timestamps = entry.timestamps.filter((t) => now - t < windowMs)
+    if (entry.timestamps.length === 0) {
+      store.delete(key)
+      return undefined
+    }
+    return entry
+  }
+
+  /** Count one request. `entry` is the bucket a prior peek() returned, if any. */
+  function count(key: string, entry: RateLimitEntry | undefined, now: number): void {
+    if (entry) entry.timestamps.push(now)
+    else store.set(key, { timestamps: [now] })
+  }
+
+  /**
    * Check and enforce the rate limit for the current request.
    * Throws a 429 error if the limit is exceeded.
    * Sets standard rate limit headers on every response.
    */
-  return async function rateLimit(event: H3Event): Promise<void> {
+  const rateLimit = async function rateLimit(event: H3Event): Promise<void> {
     const { key: ip, source } = resolveClientKey(event)
     const now = Date.now()
 
-    let entry = store.get(ip)
-    if (!entry) {
-      entry = { timestamps: [] }
-      store.set(ip, entry)
-    }
-
-    // Remove timestamps outside the current window
-    entry.timestamps = entry.timestamps.filter((t) => now - t < windowMs)
+    const entry = peek(ip, now)
+    const timestamps = entry?.timestamps ?? []
 
     // Set rate limit headers (draft RFC 7.2 / common convention)
-    const remaining = Math.max(0, maxRequests - entry.timestamps.length)
-    const resetSeconds = entry.timestamps.length > 0
-      ? Math.ceil((entry.timestamps[0]! + windowMs - now) / 1000)
+    const remaining = Math.max(0, maxRequests - timestamps.length)
+    const resetSeconds = timestamps.length > 0
+      ? Math.ceil((timestamps[0]! + windowMs - now) / 1000)
       : Math.ceil(windowMs / 1000)
 
     setResponseHeaders(event, {
@@ -108,7 +172,7 @@ export function createRateLimiter(config: RateLimitConfig) {
       'X-RateLimit-Reset': String(resetSeconds),
     })
 
-    if (entry.timestamps.length >= maxRequests) {
+    if (timestamps.length >= maxRequests) {
       setResponseHeader(event, 'Retry-After', resetSeconds)
       // Log the resolved bucket key: a limit that trips for unrelated clients is
       // almost always an IP-resolution problem (see resolveClientKey), and that
@@ -126,9 +190,19 @@ export function createRateLimiter(config: RateLimitConfig) {
       })
     }
 
-    // Record this request
-    entry.timestamps.push(now)
+    // Record the attempt up front. In `successes` mode the handler records
+    // instead, once it knows the request was not rejected.
+    if (countMode === 'attempts') count(ip, entry, now)
+  } as RateLimiter
+
+  rateLimit.record = (event: H3Event): void => {
+    if (countMode !== 'successes') return
+    const key = resolveClientKey(event).key
+    const now = Date.now()
+    count(key, peek(key, now), now)
   }
+
+  return rateLimit
 }
 
 // ─────────────────────────────────────────────

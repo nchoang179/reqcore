@@ -27,6 +27,7 @@ import { z } from 'zod'
 import type { LocationSelection } from '~/components/LocationCombobox.vue'
 import { formatJobLocation, isValidPostalCode, normalizePostalCode, POSTAL_CODE_MAX_LENGTH } from '~~/shared/job-location'
 import { descriptionLength, missingPublishRequirements, MIN_DESCRIPTION_CHARS } from '~~/shared/job-publish'
+import { slugifyJobBase } from '~~/shared/job-slug'
 import {
   SAMPLE_JOB_FORM,
   SAMPLE_JOB_QUESTIONS,
@@ -796,21 +797,13 @@ watch(currentStep, async () => {
   wizardEditor.value?.scrollTo({ top: 0, behavior: 'auto' })
 })
 
-function slugifyTitle(raw: string) {
-  return raw
-    .toLowerCase()
-    .trim()
-    .replace(/[^\w\s-]/g, '')
-    .replace(/[\s_]+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '')
-    .slice(0, 60)
-}
-
 const requestUrl = useRequestURL()
+// Preview only — the wizard never sends a slug, so the server derives the real
+// one from the title on create. Shares `slugifyJobBase` with it so what is shown
+// here is what gets minted; the suffix is drawn server-side, hence the xs.
 const applicationLink = computed(() => {
   const base = `${requestUrl.protocol}//${requestUrl.host}`
-  const slugBase = slugifyTitle(form.value.title) || 'new-job'
+  const slugBase = form.value.title.trim() ? slugifyJobBase(form.value.title) : 'new-job'
   return `${base}/jobs/${slugBase}-xxxxxxxx/apply`
 })
 

@@ -167,6 +167,43 @@ describe('createRateLimiter', () => {
     await expect(limiter(trustedAgain)).rejects.toMatchObject({ statusCode: 429 })
   })
 
+  it('does not count rejected requests when countMode is "successes"', async () => {
+    // The regression this guards: an applicant whose first attempts are rejected
+    // (wrong file type, missing answer, 413) gets locked out of the form before
+    // ever submitting anything.
+    const limiter = createRateLimiter({ windowMs: 60_000, maxRequests: 2, countMode: 'successes' })
+    const ip = '9.9.9.9'
+
+    // Ten failed attempts — the handler never calls record().
+    for (let i = 0; i < 10; i++) {
+      await expect(limiter(makeEvent(ip))).resolves.toBeUndefined()
+    }
+
+    // The full budget is still there.
+    const first = makeEvent(ip)
+    await limiter(first)
+    expect(first.__resHeaders['X-RateLimit-Remaining']).toBe('2')
+    limiter.record(first)
+
+    const second = makeEvent(ip)
+    await limiter(second)
+    limiter.record(second)
+
+    await expect(limiter(makeEvent(ip))).rejects.toMatchObject({ statusCode: 429 })
+  })
+
+  it('ignores record() in the default attempts mode so requests are never double-counted', async () => {
+    const limiter = createRateLimiter({ windowMs: 60_000, maxRequests: 2 })
+    const event = makeEvent('8.8.8.8')
+
+    await limiter(event)
+    limiter.record(event)
+
+    // Only one slot consumed by the pair above, so a second request is admitted.
+    await expect(limiter(makeEvent('8.8.8.8'))).resolves.toBeUndefined()
+    await expect(limiter(makeEvent('8.8.8.8'))).rejects.toMatchObject({ statusCode: 429 })
+  })
+
   it('does not share one bucket across clients behind a proxy in production', async () => {
     // The regression this guards: with header trust misconfigured, every request
     // keys on the platform edge socket address, so the Nth applicant across all

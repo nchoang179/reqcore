@@ -16,10 +16,23 @@ import { restoreCandidateForPublicApplication } from '../../../../utils/candidat
 import { enqueueNotification } from '../../../../utils/notifications/enqueue'
 import { applyRulesToApplication } from '../../../../utils/rules/applyRules'
 
-/** Rate limit: max 5 applications per IP per 15 minutes */
+/**
+ * Rate limit: max 30 *completed* applications per IP per hour.
+ *
+ * Counts successes only (`countMode: 'successes'`), so a candidate who trips
+ * five validation errors — wrong file type, missing answer, oversized resume —
+ * still has their full budget once they get the form right.
+ *
+ * The ceiling is deliberately generous because the bucket key is a client IP:
+ * mobile carrier CGNAT and agency offices put many genuine applicants behind
+ * one address, and blocking a real applicant costs far more than admitting a
+ * bot. Abuse is caught by the honeypot below, the global 80 writes/min
+ * limiter, and the one-application-per-candidate-per-job check.
+ */
 const applyRateLimit = createRateLimiter({
-  windowMs: 15 * 60 * 1000,
-  maxRequests: 5,
+  windowMs: 60 * 60 * 1000,
+  maxRequests: 30,
+  countMode: 'successes',
   message: 'Too many applications submitted. Please try again later.',
 })
 
@@ -32,7 +45,7 @@ const applyRateLimit = createRateLimiter({
  *   - `multipart/form-data` — form with file uploads
  *
  * Security:
- *   - IP-based rate limiting (5 requests per 15 minutes)
+ *   - IP-based rate limiting (30 completed applications per hour)
  *   - Honeypot field for basic bot detection
  *
  * Flow:
@@ -49,7 +62,8 @@ export default defineEventHandler(async (event) => {
   // Enforce rate limit before any processing.
   // Skipped outside production and in CI so local dev and E2E test environments
   // are not throttled. NODE_ENV is set explicitly by the deployment environment.
-  if (process.env.NODE_ENV === 'production' && !process.env.CI && !process.env.GITHUB_ACTIONS) {
+  const rateLimited = process.env.NODE_ENV === 'production' && !process.env.CI && !process.env.GITHUB_ACTIONS
+  if (rateLimited) {
     await applyRateLimit(event)
   }
 
@@ -170,8 +184,12 @@ export default defineEventHandler(async (event) => {
     utmContent = body.utmContent
   }
 
-  // Honeypot check — if the hidden `website` field is filled, silently reject
+  // Honeypot check — if the hidden `website` field is filled, silently reject.
+  // Counted against the limit: only a bot fills this field, and the response is
+  // indistinguishable from a real submission, so throttling it costs no
+  // genuine applicant anything.
   if (website) {
+    if (rateLimited) applyRateLimit.record(event)
     setResponseStatus(event, 200)
     return { success: true }
   }
@@ -711,6 +729,11 @@ export default defineEventHandler(async (event) => {
     is_returning_candidate: !!existingCandidate,
     auto_rule_action: ruleMatch?.action ?? null,
   })
+
+  // Count the application against the IP budget now that it exists — rejected
+  // submissions above never reached this line, so they cost the candidate
+  // nothing.
+  if (rateLimited) applyRateLimit.record(event)
 
   setResponseStatus(event, 201)
   return { success: true }

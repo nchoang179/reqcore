@@ -108,14 +108,11 @@ export default defineEventHandler(async (event) => {
   // would hard-404 (there is no slug history to redirect from).
   const nextSlug = resolveJobSlugUpdate({
     id,
-    currentStatus: existing.status,
+    publishedAt: existing.publishedAt,
     currentTitle: existing.title,
     newTitle: body.title,
     customSlug: body.slug,
   })
-  if (nextSlug) {
-    updates.slug = nextSlug
-  }
 
   // Stamp the first time this role goes public. Guarded on `publishedAt` being
   // null rather than on the previous status, so closing and re-opening a role
@@ -124,40 +121,53 @@ export default defineEventHandler(async (event) => {
     updates.publishedAt = new Date()
   }
 
-  const [updated] = await db.update(job)
-    .set(updates)
-    .where(and(eq(job.id, id), eq(job.organizationId, orgId)))
-    .returning({
-      id: job.id,
-      title: job.title,
-      slug: job.slug,
-      description: job.description,
-      location: job.location,
-      type: job.type,
-      status: job.status,
-      salaryMin: job.salaryMin,
-      salaryMax: job.salaryMax,
-      salaryCurrency: job.salaryCurrency,
-      salaryUnit: job.salaryUnit,
-      salaryNegotiable: job.salaryNegotiable,
-      remoteStatus: job.remoteStatus,
-      validThrough: job.validThrough,
-      phoneRequirement: job.phoneRequirement,
-      requireResume: job.requireResume,
-      requireCoverLetter: job.requireCoverLetter,
-      autoScoreOnApply: job.autoScoreOnApply,
-      analysisContext: job.analysisContext,
-      experienceLevel: job.experienceLevel,
-      locationCity: job.locationCity,
-      locationRegion: job.locationRegion,
-      locationCountry: job.locationCountry,
-      locationPostalCode: job.locationPostalCode,
-      department: job.department,
-      distributeToBoards: job.distributeToBoards,
-      publishedAt: job.publishedAt,
-      createdAt: job.createdAt,
-      updatedAt: job.updatedAt,
-    })
+  const applyUpdate = async (slug: string | undefined) => {
+    const [row] = await db.update(job)
+      .set(slug ? { ...updates, slug } : updates)
+      .where(and(eq(job.id, id), eq(job.organizationId, orgId)))
+      .returning({
+        id: job.id,
+        title: job.title,
+        slug: job.slug,
+        description: job.description,
+        location: job.location,
+        type: job.type,
+        status: job.status,
+        salaryMin: job.salaryMin,
+        salaryMax: job.salaryMax,
+        salaryCurrency: job.salaryCurrency,
+        salaryUnit: job.salaryUnit,
+        salaryNegotiable: job.salaryNegotiable,
+        remoteStatus: job.remoteStatus,
+        validThrough: job.validThrough,
+        phoneRequirement: job.phoneRequirement,
+        requireResume: job.requireResume,
+        requireCoverLetter: job.requireCoverLetter,
+        autoScoreOnApply: job.autoScoreOnApply,
+        analysisContext: job.analysisContext,
+        experienceLevel: job.experienceLevel,
+        locationCity: job.locationCity,
+        locationRegion: job.locationRegion,
+        locationCountry: job.locationCountry,
+        locationPostalCode: job.locationPostalCode,
+        department: job.department,
+        distributeToBoards: job.distributeToBoards,
+        publishedAt: job.publishedAt,
+        createdAt: job.createdAt,
+        updatedAt: job.updatedAt,
+      })
+    return row
+  }
+
+  // `job.slug` is unique across every org, and the suffix is only 32 bits — a
+  // rename can land on one already taken. Retry once with a fresh suffix rather
+  // than failing the whole save with a bare 500.
+  const updated = await applyUpdate(nextSlug).catch((error) => {
+    if (nextSlug && isDuplicateJobSlugError(error)) {
+      return applyUpdate(generateJobSlug(body.title ?? existing.title, crypto.randomUUID(), body.slug))
+    }
+    throw error
+  })
 
   if (!updated) {
     throw createError({ statusCode: 404, statusMessage: 'Not found' })
