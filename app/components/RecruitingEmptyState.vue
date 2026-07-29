@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowRight, Briefcase, Plus, UploadCloud } from 'lucide-vue-next'
+import { ArrowRight, Briefcase, FlaskConical, Plus, UploadCloud } from 'lucide-vue-next'
 
 const localePath = useLocalePath()
 </script>
@@ -35,11 +35,11 @@ const localePath = useLocalePath()
 
       <div class="mx-auto my-5 flex max-w-lg items-center gap-3" aria-hidden="true">
         <div class="h-px flex-1 bg-surface-200 dark:bg-surface-800" />
-        <span class="text-xs font-medium text-surface-400 dark:text-surface-500">or import candidates</span>
+        <span class="text-xs font-medium text-surface-400 dark:text-surface-500">or</span>
         <div class="h-px flex-1 bg-surface-200 dark:bg-surface-800" />
       </div>
 
-      <div class="mx-auto max-w-lg">
+      <div class="mx-auto grid max-w-lg gap-3 sm:grid-cols-2">
         <NuxtLink
           :to="localePath('/dashboard/candidates/import')"
           class="flex min-w-0 items-start gap-3 rounded-lg border border-surface-200 bg-white p-4 text-left no-underline transition-colors hover:border-brand-300 hover:bg-surface-50 dark:border-surface-800 dark:bg-surface-900 dark:hover:border-brand-800 dark:hover:bg-surface-800/60"
@@ -50,6 +50,25 @@ const localePath = useLocalePath()
           <span class="min-w-0">
             <span class="block text-sm font-semibold text-surface-900 dark:text-surface-100">Import from file</span>
             <span class="mt-1 block text-xs leading-relaxed text-surface-500 dark:text-surface-400">Upload a CSV directly to the candidate pool.</span>
+          </span>
+        </NuxtLink>
+
+        <!--
+          The escape hatch for someone who is evaluating rather than hiring. A
+          test role behaves exactly like a real one — it just never reaches the
+          public board, the career page or the job boards, so trying the product
+          out cannot litter surfaces that real candidates see.
+        -->
+        <NuxtLink
+          :to="localePath({ path: '/dashboard/jobs/new', query: { mode: 'test' } })"
+          class="flex min-w-0 items-start gap-3 rounded-lg border border-surface-200 bg-white p-4 text-left no-underline transition-colors hover:border-brand-300 hover:bg-surface-50 dark:border-surface-800 dark:bg-surface-900 dark:hover:border-brand-800 dark:hover:bg-surface-800/60"
+        >
+          <span class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-surface-100 text-surface-600 dark:bg-surface-800 dark:text-surface-300">
+            <FlaskConical class="size-4" />
+          </span>
+          <span class="min-w-0">
+            <span class="block text-sm font-semibold text-surface-900 dark:text-surface-100">Create a test job</span>
+            <span class="mt-1 block text-xs leading-relaxed text-surface-500 dark:text-surface-400">Try the full flow privately. Stays off job boards.</span>
           </span>
         </NuxtLink>
       </div>

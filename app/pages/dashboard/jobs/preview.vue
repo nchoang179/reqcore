@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ArrowLeft, Eye, RefreshCw } from 'lucide-vue-next'
+import { formatJobLocation } from '~~/shared/job-location'
 
 definePageMeta({
   layout: 'public',
@@ -25,7 +26,9 @@ type JobDraft = {
   form: {
     title: string
     description?: string
-    location?: string
+    locationCity?: string | null
+    locationRegion?: string | null
+    locationCountry?: string | null
     type: string
   }
   applicationForm: {
@@ -36,7 +39,14 @@ type JobDraft = {
   }
 }
 
+// The test-job walkthrough autosaves under its own key so it can't overwrite a
+// real draft; ?mode=test says which of the two this preview was opened for.
 const JOB_DRAFT_STORAGE_KEY = 'reqcore-job-draft'
+const TEST_JOB_DRAFT_STORAGE_KEY = 'reqcore-job-draft-test'
+const draftStorageKey = useRoute().query.mode === 'test'
+  ? TEST_JOB_DRAFT_STORAGE_KEY
+  : JOB_DRAFT_STORAGE_KEY
+
 const draft = ref<JobDraft | null>(null)
 const isReady = ref(false)
 const submitError = ref<string | null>(null)
@@ -56,9 +66,16 @@ const coverLetterText = ref('')
 const previewJob = computed(() => {
   if (!draft.value) return null
 
+  const { locationCountry, locationCity, locationRegion, ...rest } = draft.value.form
+
   return {
-    ...draft.value.form,
+    ...rest,
     ...draft.value.applicationForm,
+    // The wizard stores structured parts; the display string is derived, the
+    // same way the API derives it on save.
+    location: locationCountry
+      ? formatJobLocation({ city: locationCity, region: locationRegion, country: locationCountry })
+      : undefined,
     phoneRequirement: draft.value.applicationForm.phoneRequirement ?? 'optional',
     organizationName: activeOrg.value?.name ?? null,
   }
@@ -69,7 +86,7 @@ function loadDraft() {
   submitError.value = null
 
   try {
-    const raw = localStorage.getItem(JOB_DRAFT_STORAGE_KEY)
+    const raw = localStorage.getItem(draftStorageKey)
     if (!raw) {
       draft.value = null
       return

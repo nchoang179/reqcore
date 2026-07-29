@@ -26,7 +26,10 @@ export function useJobs(options?: {
   async function createJob(payload: {
     title: string
     description?: string
-    location?: string
+    locationCity?: string | null
+    locationRegion?: string | null
+    locationCountry?: string | null
+    locationPostalCode?: string | null
     type?: 'full_time' | 'part_time' | 'contract' | 'internship'
     experienceLevel?: 'junior' | 'mid' | 'senior' | 'lead'
     remoteStatus?: 'remote' | 'hybrid' | 'onsite'
@@ -35,6 +38,10 @@ export function useJobs(options?: {
     requireCoverLetter?: boolean
     autoScoreOnApply?: boolean
     status?: 'draft' | 'open'
+    /** Whether to syndicate this role to external job boards. Defaults on. */
+    distributeToBoards?: boolean
+    /** Marks a role created to try the product out — kept off all public surfaces. */
+    isTest?: boolean
     questions?: Array<{
       label: string
       type: 'short_text' | 'long_text' | 'single_select' | 'multi_select' | 'number' | 'date' | 'url' | 'checkbox' | 'file_upload'

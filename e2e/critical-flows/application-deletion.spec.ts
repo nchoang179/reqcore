@@ -1,11 +1,13 @@
-import { test, expect } from '../fixtures'
+import { test, expect, publishableDescription, JOB_LOCATION_PARTS } from '../fixtures'
 
 async function createJob(page: Parameters<Parameters<typeof test>[1]>[0]['page']) {
   const response = await page.request.post('/api/jobs', {
     data: {
       title: `Application deletion role ${Date.now()}`,
-      description: 'Exercises application and candidate deletion behavior.',
-      location: 'Oslo, Norway',
+      // Opening a role runs the publish guard, which wants a description of real
+      // length and a country the job boards can place it in.
+      description: publishableDescription('Exercises application and candidate deletion behavior.'),
+      ...JOB_LOCATION_PARTS,
       type: 'full_time',
       status: 'open',
       phoneRequirement: 'optional',

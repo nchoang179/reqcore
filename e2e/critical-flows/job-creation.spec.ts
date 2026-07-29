@@ -1,4 +1,12 @@
-import { test, expect, getPublishedApplicationLink } from '../fixtures'
+import {
+  test,
+  expect,
+  getPublishedApplicationLink,
+  publishableDescription,
+  selectJobLocation,
+  JOB_LOCATION,
+  JOB_LOCATION_PARTS,
+} from '../fixtures'
 
 /**
  * Critical flow: Recruiter creates and publishes a job.
@@ -14,8 +22,11 @@ import { test, expect, getPublishedApplicationLink } from '../fixtures'
  */
 
 const JOB_TITLE = 'Senior QA Engineer'
-const JOB_DESCRIPTION = 'We are looking for a senior QA engineer to lead our testing efforts.'
-const JOB_LOCATION = 'Remote'
+// Job boards reject thin listings, so the wizard requires a real description
+// before a role can leave step 1 — this one clears that floor.
+const JOB_DESCRIPTION = publishableDescription(
+  'We are looking for a senior QA engineer to lead our testing efforts.',
+)
 const QUESTION_LABEL = 'Which testing framework do you know best?'
 const UPDATED_QUESTION_LABEL = 'Which browser testing framework do you know best?'
 
@@ -42,6 +53,15 @@ test.describe('Job Creation Flow', () => {
 
     await title.fill('Robustness Test Engineer')
     const continueButton = page.locator('form').getByRole('button', { name: 'Save & continue' })
+
+    // A title alone is enough for a draft, but not to leave Job details: a role
+    // published without a location or with a stub description is one the job
+    // boards drop, so the wizard asks for both up front.
+    await expect(continueButton).toBeDisabled()
+    await page.getByLabel('Description').fill(JOB_DESCRIPTION)
+    await expect(continueButton).toBeDisabled()
+    await selectJobLocation(page)
+
     await expect(continueButton).toBeEnabled()
     await continueButton.click()
 
@@ -90,7 +110,7 @@ test.describe('Job Creation Flow', () => {
     await page.getByLabel('Job title').waitFor({ state: 'visible', timeout: 15_000 })
     await page.getByLabel('Job title').fill(JOB_TITLE)
     await page.getByLabel('Description').fill(JOB_DESCRIPTION)
-    await page.getByLabel('Location').fill(JOB_LOCATION)
+    await selectJobLocation(page)
 
     // The persistent candidate preview should update as job details are entered.
     const preview = page.getByRole('complementary')
@@ -197,5 +217,96 @@ test.describe('Job Creation Flow', () => {
     await expect(publishedQuestion).toBeVisible()
     await expect(publishedQuestion.getByRole('option', { name: 'Playwright' })).toHaveCount(1)
     await expect(publishedQuestion.getByRole('option', { name: 'Cypress' })).toHaveCount(1)
+  })
+
+  test('an org gets one test role, not an unlimited supply of free open ones', async ({ authenticatedPage }) => {
+    const page = authenticatedPage
+    const createTestRole = () => page.request.post('/api/jobs', {
+      data: {
+        title: `Walkthrough role ${Date.now()}`,
+        description: publishableDescription('Created by the try-it-out walkthrough.'),
+        ...JOB_LOCATION_PARTS,
+        type: 'full_time',
+        status: 'open',
+        isTest: true,
+        questions: [],
+        criteria: [],
+      },
+    })
+
+    // A test role is exempt from the plan's active-role cap, so the exemption
+    // itself is capped: without this, `?mode=test` opens unlimited free roles
+    // with live public apply links on a product priced per active role.
+    expect((await createTestRole()).status()).toBe(201)
+
+    const second = await createTestRole()
+    expect(second.status()).toBe(409)
+    expect((await second.json()).data?.code).toBe('TEST_ROLE_EXISTS')
+  })
+
+  test('the test role does not follow the user back into the real wizard', async ({ authenticatedPage }) => {
+    const page = authenticatedPage
+    const title = page.getByLabel('Job title')
+    const DRAFT_TITLE = 'Actual role I was writing'
+    const savedDraftTitle = () => page.evaluate(() => {
+      const raw = localStorage.getItem('reqcore-job-draft')
+      return raw ? JSON.parse(raw).form?.title ?? null : null
+    })
+
+    // A real draft in progress, left behind the way the autosave leaves it.
+    // Typed before hydration it would land in the DOM but never reach the
+    // wizard's state, so wait on the autosave rather than on the field looking
+    // filled — that is the part the rest of the test depends on.
+    await page.goto('/dashboard/jobs/new')
+    await page.waitForLoadState('networkidle')
+    await expect.poll(async () => {
+      await title.fill(DRAFT_TITLE)
+      return await savedDraftTitle()
+    }).toBe(DRAFT_TITLE)
+
+    // Detour through the walkthrough, which fills every field with the sample role.
+    await page.goto('/dashboard/jobs/new?mode=test')
+    await expect(page.getByText("You're creating a test job")).toBeVisible()
+    await expect(title).toHaveValue('Customer Support Specialist')
+
+    // Back to the real wizard: the sample role must be gone — having to clear
+    // every field by hand before typing is what this guards against — and the
+    // recruiter's own draft must have survived the detour.
+    await page.goto('/dashboard/jobs/new')
+    await expect(page.getByText("You're creating a test job")).toHaveCount(0)
+    await expect(title).toHaveValue(DRAFT_TITLE)
+  })
+
+  test('saving unrelated settings keeps the location of a role that predates the picker', async ({ authenticatedPage }) => {
+    const page = authenticatedPage
+
+    const created = await page.request.post('/api/jobs', {
+      data: {
+        title: `Legacy located role ${Date.now()}`,
+        description: publishableDescription('Has free-text location and nothing structured.'),
+        location: 'Somewhere in Norway',
+        type: 'full_time',
+        status: 'draft',
+        questions: [],
+        criteria: [],
+      },
+    })
+    expect(created.status()).toBe(201)
+    const { id } = await created.json()
+
+    // What the settings form sends on every save: all four structured fields,
+    // null for a job that never had a place picked. That must not be read as
+    // "clear the location" — the free text is the only location this job has.
+    const saved = await page.request.patch(`/api/jobs/${id}`, {
+      data: {
+        title: 'Legacy located role, renamed',
+        locationCity: null,
+        locationRegion: null,
+        locationCountry: null,
+        locationPostalCode: null,
+      },
+    })
+    expect(saved.status()).toBe(200)
+    expect((await saved.json()).location).toBe('Somewhere in Norway')
   })
 })

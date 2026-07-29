@@ -98,12 +98,77 @@ export const job = pgTable('job', {
   validThrough: timestamp('valid_through'),
   /** Experience level required for this role */
   experienceLevel: experienceLevelEnum('experience_level'),
+  // ── Structured location ──
+  // `location` above stays the free-text display string. These supplement it:
+  // job board feeds reject or heavily downrank postings without a country, and
+  // schema.org PostalAddress wants the parts separated.
+  locationCity: text('location_city'),
+  locationRegion: text('location_region'),
+  /** ISO 3166-1 alpha-2, uppercased. Required to appear in the job board feed. */
+  locationCountry: text('location_country'),
+  /**
+   * Optional postal code, uppercased and whitespace-collapsed.
+   *
+   * Aggregators geocode a city name to its centroid, which places every role in
+   * a large metro at the same pin — wrong by enough to fall out of the radius
+   * searches ("within 10 miles") candidates actually filter by. A postal code
+   * narrows that. It stays out of the derived `location` display string on
+   * purpose: putting it there would split the career page's location filter
+   * into one group per postal code.
+   */
+  locationPostalCode: text('location_postal_code'),
+  /** Maps to <category> in the feed. */
+  department: text('department'),
+  // ── Distribution ──
+  /**
+   * Whether this job is syndicated to external job boards via /jobs.xml.
+   * Defaults on — publishing is the distribution action. Recruiters opt a
+   * confidential search out per job.
+   */
+  distributeToBoards: boolean('distribute_to_boards').notNull().default(true),
+  /**
+   * A role created to try the product out rather than to hire for.
+   *
+   * It behaves like any other job inside the workspace — it opens, collects
+   * applications and gets scored — but it is excluded from every surface a real
+   * candidate or an aggregator can reach: the public board, career pages, the
+   * sitemap and /jobs.xml. That is the whole point: someone evaluating Reqcore
+   * can walk the real create-a-job flow without their practice run turning into
+   * a listing the world sees, which is what fills the board with "test" and
+   * "asdf" roles today.
+   *
+   * Never inferred. Only the sample-job entry point sets it, so a real role can
+   * never be quietly demoted out of distribution.
+   */
+  isTest: boolean('is_test').notNull().default(false),
+  /**
+   * First time this job went `open`. Feeds and Google for Jobs rank on posting
+   * age, so `createdAt` misreports a draft that sat unpublished for weeks. Set
+   * once and never reset — reopening a closed role keeps its original age.
+   */
+  publishedAt: timestamp('published_at'),
+  /**
+   * AI-written social copy for the Promote tab, cached so reopening the tab
+   * doesn't re-bill a generation. Regenerating overwrites it.
+   */
+  shareCopy: jsonb('share_copy').$type<{
+    channels: Record<string, string>
+    generatedAt: string
+    /** `SHARE_LANGUAGES` code it was written in; absent on copy cached before the picker existed. */
+    language?: string
+  }>(),
   // ── Application form settings ──
   phoneRequirement: text('phone_requirement').$type<'hidden' | 'optional' | 'required'>().notNull().default('optional'),
   requireResume: boolean('require_resume').notNull().default(false),
   requireCoverLetter: boolean('require_cover_letter').notNull().default(false),
   // ── AI scoring settings ──
-  autoScoreOnApply: boolean('auto_score_on_apply').notNull().default(false),
+  /**
+   * Ranking every applicant as they arrive is the default: a job created
+   * without an opinion on it should still produce a shortlist. It is inert on a
+   * job with no scoring criteria — `autoScoreApplication` returns before
+   * spending anything — so the default costs nothing on its own.
+   */
+  autoScoreOnApply: boolean('auto_score_on_apply').notNull().default(true),
   /**
    * Which optional candidate data sources the AI analysis reads. A resume is
    * always included when present, but another enabled source is sufficient.
@@ -118,6 +183,11 @@ export const job = pgTable('job', {
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 }, (t) => ([
   index('job_organization_id_idx').on(t.organizationId),
+  // One test role per org. A test role skips the plan's active-role cap, so
+  // without this the walkthrough is a way to hold unlimited free open roles.
+  // Enforced here rather than only in the API because the check-then-insert in
+  // the create endpoint is racy — concurrent requests both pass it.
+  uniqueIndex('job_one_test_per_org_idx').on(t.organizationId).where(sql`${t.isTest}`),
 ]))
 
 /**
@@ -352,6 +422,10 @@ export const orgSettings = pgTable('org_settings', {
   privacyPolicyUrl: text('privacy_policy_url'),
   privacyPolicyText: text('privacy_policy_text'),
   privacyContactEmail: text('privacy_contact_email'),
+  // ── Company profile (used by the job board feed's <company> block) ──
+  /** Public company website. Aggregators rank feeds with a resolvable company URL higher. */
+  websiteUrl: text('website_url'),
+  companyDescription: text('company_description'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 }, (t) => ([
@@ -739,6 +813,10 @@ export const sourceChannelEnum = pgEnum('source_channel', [
   'greenhouse_board', 'google_jobs', 'facebook', 'twitter', 'instagram',
   'tiktok', 'reddit', 'referral', 'career_site', 'email',
   'event', 'agency', 'direct', 'other', 'custom',
+  // Aggregators that ingest the platform-wide /jobs.xml feed. Applications
+  // arriving from them are attributed via the utm_source stamped into the feed.
+  'jooble', 'adzuna', 'careerjet', 'talent_com', 'jobsora',
+  'jora', 'whatjobs', 'whatsapp',
 ])
 
 /**

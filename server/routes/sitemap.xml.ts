@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { job, careerPage } from '../database/schema'
 
 /**
@@ -30,7 +30,9 @@ export default defineEventHandler(async (event) => {
 
   // Open jobs — each has its own indexable /jobs/:slug page (JobPosting markup).
   const jobs = await db.query.job.findMany({
-    where: eq(job.status, 'open'),
+    // Test roles are reachable by direct link so their creator can walk the
+    // apply flow, but they are never submitted to search engines.
+    where: and(eq(job.status, 'open'), eq(job.isTest, false)),
     columns: { slug: true, updatedAt: true },
   })
   for (const j of jobs) {

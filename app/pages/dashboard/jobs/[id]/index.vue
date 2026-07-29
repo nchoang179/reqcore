@@ -7,7 +7,7 @@ import {
   CheckCircle2, XCircle, AlertTriangle, ArrowUpDown, ListFilter,
   Maximize2, Minimize2, Brain, History, SlidersHorizontal,
   ChevronLeft, ChevronRight, UnfoldHorizontal, FoldHorizontal,
-  StickyNote, MoreHorizontal, Inbox, Zap,
+  StickyNote, MoreHorizontal, Inbox, Zap, Megaphone,
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 import type { Interview, InterviewMutationResult } from '~/composables/useInterviews'
@@ -178,6 +178,15 @@ const statusCounts = computed(() => {
   }
   return counts
 })
+
+/**
+ * True when the job has no applicants in any stage — not merely none in the
+ * stage currently being viewed. Distinguishes "nothing here yet, go get
+ * applicants" from "this stage is empty, look at another one".
+ */
+const hasNoApplicantsAtAll = computed(() =>
+  Object.values(statusCounts.value).every(count => count === 0),
+)
 
 const selectedApplicationId = ref<string | null>(null)
 // One-shot instruction for the next list arrival: paging backwards should land on
@@ -1698,6 +1707,14 @@ function closeDocPreview() {
               <p class="mt-1 text-xs text-surface-400 dark:text-surface-500">
                 {{ (searchTerm.trim() || hasActiveFilters) ? 'Try adjusting your search or filters.' : `No one in ${formatStatusLabel(focusStatus)} stage.` }}
               </p>
+              <NuxtLink
+                v-if="hasNoApplicantsAtAll && !searchTerm.trim() && !hasActiveFilters"
+                :to="localePath(`/dashboard/jobs/${jobId}/promote`)"
+                class="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white no-underline transition-colors hover:bg-brand-700"
+              >
+                <Megaphone class="size-3.5" />
+                Promote this job
+              </NuxtLink>
               <button
                 v-if="hasActiveFilters"
                 class="mt-2 cursor-pointer text-xs font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
@@ -1766,11 +1783,21 @@ function closeDocPreview() {
               <UserRound class="size-7 text-surface-400 dark:text-surface-500" />
             </div>
             <p class="text-base font-semibold text-surface-700 dark:text-surface-200">
-              No candidates in {{ formatStatusLabel(focusStatus) }}
+              {{ hasNoApplicantsAtAll ? 'No applicants yet' : `No candidates in ${formatStatusLabel(focusStatus)}` }}
             </p>
             <p class="mt-1.5 text-sm text-surface-500 dark:text-surface-400 max-w-xs">
-              Switch to another pipeline stage to review candidates.
+              {{ hasNoApplicantsAtAll
+                ? 'This role is live. Share it to start getting applicants.'
+                : 'Switch to another pipeline stage to review candidates.' }}
             </p>
+            <NuxtLink
+              v-if="hasNoApplicantsAtAll"
+              :to="localePath(`/dashboard/jobs/${jobId}/promote`)"
+              class="mt-4 inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white no-underline transition-colors hover:bg-brand-700"
+            >
+              <Megaphone class="size-4" />
+              Promote this job
+            </NuxtLink>
           </div>
 
           <template v-else>

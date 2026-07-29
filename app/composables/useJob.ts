@@ -21,7 +21,12 @@ export function useJob(id: MaybeRefOrGetter<string>) {
   async function updateJob(payload: Partial<{
     title: string
     description: string | null
+    /** Derived from the structured parts server-side — send those, not this. */
     location: string | null
+    locationCity: string | null
+    locationRegion: string | null
+    locationCountry: string | null
+    locationPostalCode: string | null
     type: 'full_time' | 'part_time' | 'contract' | 'internship'
     status: 'draft' | 'open' | 'closed' | 'archived'
     salaryMin: number | null
@@ -37,6 +42,8 @@ export function useJob(id: MaybeRefOrGetter<string>) {
     autoScoreOnApply: boolean
     analysisContext: { coverLetter: boolean, screeningAnswers: boolean, recruiterNotes: boolean }
     experienceLevel: 'junior' | 'mid' | 'senior' | 'lead' | null
+    /** Whether to syndicate this role to external job boards. */
+    distributeToBoards: boolean
   }>) {
     try {
       const updated = await $fetch(`/api/jobs/${jobId.value}`, {

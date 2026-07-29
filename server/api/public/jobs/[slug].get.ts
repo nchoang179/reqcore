@@ -31,10 +31,22 @@ export default defineEventHandler(async (event) => {
       salaryNegotiable: true,
       remoteStatus: true,
       validThrough: true,
+      // Stays reachable by direct link so the creator can walk their own apply
+      // flow — the page uses this to mark itself noindex and drop the
+      // JobPosting markup, so a practice role never reaches search results.
+      isTest: true,
       phoneRequirement: true,
       requireResume: true,
       requireCoverLetter: true,
       createdAt: true,
+      // Structured location + posting date feed the JobPosting JSON-LD that
+      // Google for Jobs reads.
+      locationCity: true,
+      locationRegion: true,
+      locationCountry: true,
+      locationPostalCode: true,
+      department: true,
+      publishedAt: true,
     },
     with: {
       organization: {

@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { createQuestionSchema } from './jobQuestion'
 import { createCriterionSchema } from './scoring'
+import { isValidPostalCode, normalizePostalCode, POSTAL_CODE_MAX_LENGTH } from '../../../shared/job-location'
 
 export { JOB_STATUS_TRANSITIONS } from '../../../shared/status-transitions'
 
@@ -8,6 +9,32 @@ export { JOB_STATUS_TRANSITIONS } from '../../../shared/status-transitions'
  * Which optional candidate data sources the AI analysis reads.
  * A resume is included automatically when present.
  */
+/**
+ * ISO 3166-1 alpha-2 country code, normalized to uppercase.
+ * Job board feeds match on the two-letter code, so "no", "No" and "NO" must all
+ * store identically.
+ */
+export const countryCodeSchema = z
+  .string()
+  .trim()
+  .length(2, 'Use a 2-letter country code')
+  .regex(/^[A-Za-z]{2}$/, 'Use a 2-letter country code')
+  .transform(value => value.toUpperCase())
+
+/**
+ * Optional postal code. Normalized the same way everywhere so the feed and the
+ * structured data agree — see `normalizePostalCode` for why the character set
+ * is narrow.
+ */
+export const postalCodeSchema = z
+  .string()
+  .trim()
+  .max(POSTAL_CODE_MAX_LENGTH, `Postal code must be ${POSTAL_CODE_MAX_LENGTH} characters or less`)
+  // Empty is how a cleared input arrives; `normalizePostalCode` turns it into
+  // the NULL that clearing is supposed to mean.
+  .refine(value => !value || isValidPostalCode(value), 'Enter a postal code, not a street address')
+  .transform(normalizePostalCode)
+
 export const analysisContextSchema = z.object({
   coverLetter: z.boolean(),
   screeningAnswers: z.boolean(),
@@ -47,6 +74,19 @@ export const createJobSchema = z.object({
   autoScoreOnApply: z.boolean().optional().default(false),
   /** Experience level required for this role */
   experienceLevel: z.enum(['junior', 'mid', 'senior', 'lead']).optional(),
+  /** Structured location — supplements the free-text `location` display string */
+  locationCity: z.string().trim().max(120).nullable().optional(),
+  locationRegion: z.string().trim().max(120).nullable().optional(),
+  locationCountry: countryCodeSchema.nullable().optional(),
+  locationPostalCode: postalCodeSchema.nullable().optional(),
+  department: z.string().trim().max(120).nullable().optional(),
+  /** Whether to syndicate this job to external job boards. Defaults on. */
+  distributeToBoards: z.boolean().optional().default(true),
+  /**
+   * Marks a role created to try the product out. Kept off every public surface
+   * — see the column note in the schema. Opt-in only: absent means a real job.
+   */
+  isTest: z.boolean().optional().default(false),
 })
 
 /**
@@ -103,6 +143,13 @@ export const updateJobSchema = z.object({
   /** Experience level required for this role */
   experienceLevel: z.enum(['junior', 'mid', 'senior', 'lead']).nullable().optional(),
   status: z.enum(['draft', 'open', 'closed', 'archived']).optional(),
+  /** Structured location — pass null to explicitly clear a part */
+  locationCity: z.string().trim().max(120).nullable().optional(),
+  locationRegion: z.string().trim().max(120).nullable().optional(),
+  locationCountry: countryCodeSchema.nullable().optional(),
+  locationPostalCode: postalCodeSchema.nullable().optional(),
+  department: z.string().trim().max(120).nullable().optional(),
+  distributeToBoards: z.boolean().optional(),
 })
 
 /** Schema for job list query params */

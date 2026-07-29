@@ -11,6 +11,8 @@ export const sourceChannels = [
   'greenhouse_board', 'google_jobs', 'facebook', 'twitter', 'instagram',
   'tiktok', 'reddit', 'referral', 'career_site', 'email',
   'event', 'agency', 'direct', 'other', 'custom',
+  'jooble', 'adzuna', 'careerjet', 'talent_com', 'jobsora',
+  'jora', 'whatjobs', 'whatsapp',
 ] as const
 
 export type SourceChannel = typeof sourceChannels[number]

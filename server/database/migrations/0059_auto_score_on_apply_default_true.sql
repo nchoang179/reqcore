@@ -1,0 +1,1 @@
+ALTER TABLE "job" ALTER COLUMN "auto_score_on_apply" SET DEFAULT true;

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { MapPin, Briefcase, Building2, ArrowLeft, ExternalLink, Calendar, ChevronRight } from 'lucide-vue-next'
+import { markdownToPlainText, markdownToFeedHtml } from '~~/shared/job-description'
 
 definePageMeta({
   layout: 'public',
@@ -46,23 +47,6 @@ const { data: job, status: fetchStatus, error: fetchError } = useFetch(
   { key: `public-job-detail-${jobSlug}` },
 )
 
-function markdownToPlainText(markdown?: string | null): string {
-  if (!markdown) return ''
-
-  return markdown
-    .replace(/```[\s\S]*?```/g, ' ')
-    .replace(/`([^`]+)`/g, '$1')
-    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-    .replace(/^#{1,6}\s+/gm, '')
-    .replace(/^\s{0,3}[-*+]\s+/gm, '')
-    .replace(/^\s{0,3}\d+\.\s+/gm, '')
-    .replace(/[*_~]/g, '')
-    .replace(/\n+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
 const jobDescriptionPlain = computed(() => markdownToPlainText(job.value?.description))
 
 // ─────────────────────────────────────────────
@@ -96,8 +80,11 @@ useSeoMeta({
   // API but renders a "not found" body with a 200 status, so opt it out of
   // indexing to avoid a soft 404 and drop the expired posting from Google for
   // Jobs — or (b) this is a localized variant (see `isLocalizedVariant`).
+  // — or (c) this is a test role. It stays reachable so whoever created it can
+  // walk their own apply flow, but it describes a job nobody is hiring for, so
+  // it must never enter a search index.
   robots: () =>
-    fetchError.value || isLocalizedVariant.value
+    fetchError.value || isLocalizedVariant.value || job.value?.isTest
       ? 'noindex, nofollow'
       : 'index, follow',
 })
@@ -125,13 +112,27 @@ function mapEmploymentType(type: string): string {
 // resolves and is serialized into the rendered head.
 const jobPostingJsonLd = computed(() => {
   if (!job.value) return null
+  // Google for Jobs treats JobPosting markup as a claim that a real vacancy
+  // exists. A test role would be a false one, and structured-data violations
+  // are judged per-domain.
+  if (job.value.isTest) return null
 
   const j = job.value
   const posting: Record<string, unknown> = {
     '@type': 'JobPosting',
     'title': j.title,
-    'description': jobDescriptionPlain.value || j.title,
-    'datePosted': j.createdAt,
+    // Google accepts HTML here and rewards the structure — a flattened wall of
+    // plain text loses the requirements and responsibilities lists entirely.
+    // Falls back to plain text for a description that renders to nothing.
+    'description': markdownToFeedHtml(j.description) || jobDescriptionPlain.value || j.title,
+    'identifier': {
+      '@type': 'PropertyValue',
+      'name': j.organizationName ?? 'Reqcore',
+      'value': j.id,
+    },
+    // `publishedAt` is when the role actually went live. `createdAt` would date
+    // a role to when its draft was started, ageing it before anyone saw it.
+    'datePosted': j.publishedAt ?? j.createdAt,
     'employmentType': mapEmploymentType(j.type),
     'directApply': true,
     // Canonical, unprefixed job URL so Google for Jobs treats the locale
@@ -148,24 +149,39 @@ const jobPostingJsonLd = computed(() => {
     }
   }
 
-  // Job location
-  if (j.location) {
-    posting.jobLocation = {
-      '@type': 'Place',
-      'address': {
-        '@type': 'PostalAddress',
-        'addressLocality': j.location,
-      },
+  const isFullyRemote = j.remoteStatus === 'remote'
+
+  // Hybrid roles are telecommute-eligible but still tied to an office, so they
+  // keep a jobLocation. Fully remote roles get applicantLocationRequirements
+  // *instead of* jobLocation — Google warns when a TELECOMMUTE posting also
+  // claims a physical place.
+  if (isFullyRemote || j.remoteStatus === 'hybrid') {
+    posting.jobLocationType = 'TELECOMMUTE'
+  }
+
+  if (isFullyRemote) {
+    posting.applicantLocationRequirements = {
+      '@type': 'Country',
+      'name': j.locationCountry || 'Anywhere',
+    }
+  } else {
+    // Prefer the structured parts; fall back to the free-text string as the
+    // locality only when nothing structured has been filled in.
+    const address: Record<string, unknown> = { '@type': 'PostalAddress' }
+    if (j.locationCity) address.addressLocality = j.locationCity
+    if (j.locationRegion) address.addressRegion = j.locationRegion
+    if (j.locationCountry) address.addressCountry = j.locationCountry
+    if (j.locationPostalCode) address.postalCode = j.locationPostalCode
+    if (!j.locationCity && !j.locationRegion && j.location) {
+      address.addressLocality = j.location
+    }
+    if (Object.keys(address).length > 1) {
+      posting.jobLocation = { '@type': 'Place', address }
     }
   }
 
-  // Remote work
-  if (j.remoteStatus === 'remote') {
-    posting.jobLocationType = 'TELECOMMUTE'
-    posting.applicantLocationRequirements = {
-      '@type': 'Country',
-      'name': 'Anywhere',
-    }
+  if (j.department) {
+    posting.occupationalCategory = j.department
   }
 
   // Valid through

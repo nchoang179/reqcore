@@ -11,7 +11,6 @@ import {
   FileEdit,
   ExternalLink,
   PartyPopper,
-  Copy,
   Eye,
   Briefcase,
   FileText,
@@ -21,17 +20,18 @@ import {
   Loader2,
   SlidersHorizontal,
   Share2,
-  Globe,
   Globe2,
-  Mail,
-  Users,
-  BarChart3,
-  Hash,
-  Megaphone,
-  Building2,
-  Search,
+  FlaskConical,
 } from 'lucide-vue-next'
 import { z } from 'zod'
+import type { LocationSelection } from '~/components/LocationCombobox.vue'
+import { formatJobLocation, isValidPostalCode, normalizePostalCode, POSTAL_CODE_MAX_LENGTH } from '~~/shared/job-location'
+import { descriptionLength, missingPublishRequirements, MIN_DESCRIPTION_CHARS } from '~~/shared/job-publish'
+import {
+  SAMPLE_JOB_FORM,
+  SAMPLE_JOB_QUESTIONS,
+  SAMPLE_SCORING_CRITERIA,
+} from '~~/shared/sample-job'
 
 definePageMeta({
   layout: 'dashboard',
@@ -45,6 +45,7 @@ useSeoMeta({
 })
 
 const localePath = useLocalePath()
+const route = useRoute()
 const { createJob } = useJobs()
 const { track } = useTrack()
 const toast = useToast()
@@ -92,11 +93,40 @@ const steps = [
 const form = ref({
   title: '',
   description: '',
-  location: '',
+  // Structured location. The free-text `job.location` display string is derived
+  // from these server-side, so the wizard never sends one.
+  locationCity: null as string | null,
+  locationRegion: null as string | null,
+  locationCountry: null as string | null,
+  locationPostalCode: null as string | null,
   type: 'full_time' as 'full_time' | 'part_time' | 'contract' | 'internship',
   experienceLevel: 'mid' as 'junior' | 'mid' | 'senior' | 'lead',
   remoteStatus: undefined as 'remote' | 'hybrid' | 'onsite' | undefined,
 })
+
+/** Adapter between the three flat form fields and the picker's single value. */
+const locationSelection = computed<LocationSelection | null>({
+  get: () => form.value.locationCountry
+    ? { city: form.value.locationCity, region: form.value.locationRegion, country: form.value.locationCountry }
+    : null,
+  set: (value) => {
+    form.value.locationCity = value?.city ?? null
+    form.value.locationRegion = value?.region ?? null
+    form.value.locationCountry = value?.country ?? null
+    // A postal code belongs to the place that was just replaced, so it cannot
+    // survive the change — "0150" under a newly picked Berlin is worse than
+    // nothing.
+    form.value.locationPostalCode = null
+  },
+})
+
+const locationDisplay = computed(() => formatJobLocation(locationSelection.value))
+
+/** The candidate-facing preview wants the display string, not the parts. */
+const previewJobDetails = computed(() => ({
+  ...form.value,
+  location: locationDisplay.value,
+}))
 
 // Step 2: Application form (client-only for now)
 const applicationForm = ref({
@@ -122,7 +152,13 @@ const isGeneratingCriteria = ref(false)
 const showCustomForm = ref(false)
 const showAdvanced = ref(false)
 const editingCriterion = ref<ScoringCriterionDraft | null>(null)
-const autoScoreOnApply = ref(false)
+/**
+ * Ranking every applicant is the reason the criteria exist, so it is on unless
+ * it is turned off. It still costs nothing on a job with no criteria: the
+ * submit below only sends it when there is a rubric to score against, and the
+ * scorer itself bails on a job with none.
+ */
+const autoScoreOnApply = ref(true)
 
 const customCriterionForm = ref({
   key: '',
@@ -250,6 +286,97 @@ async function generateAiCriteria() {
   }
 }
 
+/**
+ * The criteria this role gets written for it before anyone asks.
+ *
+ * Step 3 used to open on a choice between a canned template, an AI pass and
+ * skipping — a decision nobody has a basis for making about a feature they have
+ * not yet seen work. A finished rubric they can read and edit sells the scoring;
+ * a button offering to write one does not.
+ *
+ * It runs at most once per visit to the wizard. Clearing the list to get back to
+ * the options is a request for the other paths, not for a rewrite.
+ */
+const autoCriteriaState = ref<'idle' | 'running' | 'done' | 'failed'>('idle')
+
+/**
+ * The writing happens while the user is still on step 2, so without this the
+ * finished rubric is simply sitting there when step 3 opens, with nothing to
+ * say it was read out of their job description. The list fades in card by card
+ * on that first arrival instead of appearing whole.
+ */
+const criteriaRevealPending = ref(false)
+const criteriaRevealing = ref(false)
+
+async function autoGenerateCriteria() {
+  if (autoCriteriaState.value !== 'idle') return
+  // A restored draft, the sample role, or a set already chosen all arrive with
+  // criteria in hand — there is nothing left to write.
+  if (scoringCriteria.value.length > 0) return
+  // The walkthrough ships its own criteria so the sample shortlist matches them.
+  if (isTestMode.value) return
+  if (!isAiConfigured.value) return
+
+  const { title, description } = form.value
+  if (!title || !description) return
+
+  autoCriteriaState.value = 'running'
+  try {
+    const result = await $fetch('/api/ai-config/generate-criteria', {
+      method: 'POST',
+      body: { title, description },
+    })
+    const generated: ScoringCriterionDraft[] = (result.criteria ?? []).map((c: any) => ({
+      key: c.key,
+      name: c.name,
+      description: c.description ?? '',
+      category: c.category ?? 'custom',
+      maxScore: c.maxScore ?? 10,
+      weight: c.weight ?? 50,
+    }))
+
+    // Empty is a failure wearing a 200, and the user may well have picked a
+    // template by hand while this was in flight. Either way, leave the step
+    // showing what it would have shown without us.
+    if (generated.length === 0 || scoringCriteria.value.length > 0) {
+      autoCriteriaState.value = 'failed'
+      return
+    }
+
+    scoringCriteria.value = generated
+    scoringMode.value = 'ai'
+    autoCriteriaState.value = 'done'
+    criteriaRevealPending.value = true
+    track('ai_criteria_generated', { criteria_count: generated.length, auto: true })
+  } catch {
+    // Nobody asked for this, so nothing is said about it failing. Step 3 falls
+    // back to the recommended template — the screen it had before.
+    autoCriteriaState.value = 'failed'
+  }
+}
+
+/**
+ * Started on the way out of step 1 rather than on arrival at step 3, so the
+ * wait hides behind the application-form step instead of being a spinner the
+ * user sits and watches.
+ *
+ * A restored draft sitting past step 3 with an empty list is the one case to
+ * leave alone: that user reached the scoring step and chose to skip it, and
+ * writing criteria back in would overturn the answer they gave.
+ */
+watch(currentStep, (step) => {
+  if (step >= 2 && step <= 3) autoGenerateCriteria()
+})
+
+/** Plays the fade-in once, whenever step 3 is first opened with written criteria. */
+watch([currentStep, criteriaRevealPending], () => {
+  if (currentStep.value !== 3 || !criteriaRevealPending.value) return
+  criteriaRevealPending.value = false
+  if (import.meta.client && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+  criteriaRevealing.value = true
+  setTimeout(() => { criteriaRevealing.value = false }, 1200)
+}, { flush: 'post' })
+
 function addCustomCriterion() {
   const f = customCriterionForm.value
   if (scoringCriteria.value.length >= 20) {
@@ -292,13 +419,25 @@ function autoGenerateKey(name: string): string {
 }
 
 const isSubmitting = ref(false)
+/** Covers the gap between "job created" and the shortlist being ready to show. */
+const isPopulatingSample = ref(false)
 const errors = ref<Record<string, string>>({})
 const linkCopied = ref(false)
 
 const formSchema = z.object({
   title: z.string().trim().min(1, 'Title is required').max(200, 'Title must be 200 characters or less'),
   description: z.string().trim().max(100_000, 'Description is too long'),
-  location: z.string().trim().max(500, 'Location must be 500 characters or less'),
+  // Optional here on purpose: a draft may be half-filled. Publishing is what
+  // requires a placeable location — see `validatePublishLocation`.
+  locationCity: z.string().trim().max(120).nullable().default(null),
+  locationRegion: z.string().trim().max(120).nullable().default(null),
+  locationCountry: z.string().trim().length(2).nullable().default(null),
+  locationPostalCode: z.string().trim()
+    .max(POSTAL_CODE_MAX_LENGTH, `Postal code must be ${POSTAL_CODE_MAX_LENGTH} characters or less`)
+    .refine(value => !value || isValidPostalCode(value), 'Enter a postal code, not a street address')
+    .transform(normalizePostalCode)
+    .nullable()
+    .default(null),
   type: z.enum(['full_time', 'part_time', 'contract', 'internship']),
   experienceLevel: z.enum(['junior', 'mid', 'senior', 'lead']),
   remoteStatus: z.enum(['remote', 'hybrid', 'onsite']).optional(),
@@ -337,8 +476,32 @@ const isAiConfigured = computed(() => {
   return Array.isArray(aiConfigData.value) && aiConfigData.value.some((c) => c.hasApiKey)
 })
 
+/**
+ * Whether publishing also syndicates this role to the external job boards.
+ *
+ * Chosen on step 4 but declared here, with the rest of the persisted wizard
+ * state, so the autosave below can read it. Defaults on: free distribution is
+ * why most people publish at all. What it buys is the ability to say no *before*
+ * the role goes out — a confidential or internal-only search cannot be un-sent
+ * once the aggregators have picked it up.
+ */
+const distributeToBoards = ref(true)
+
+/**
+ * Whether this visit is the test-job walkthrough rather than a real role.
+ * Declared here because the autosave below keys off it.
+ */
+const isTestMode = computed(() => route.query.mode === 'test')
+
 // Auto-save to localStorage
+//
+// The walkthrough saves under its own key. It shares this page with the real
+// wizard, so with one key the sample role would overwrite a half-finished real
+// draft — and then come back in its place the next time someone starts a
+// genuine role.
 const AUTO_SAVE_KEY = 'reqcore-job-draft'
+const TEST_AUTO_SAVE_KEY = 'reqcore-job-draft-test'
+const autoSaveKey = computed(() => (isTestMode.value ? TEST_AUTO_SAVE_KEY : AUTO_SAVE_KEY))
 
 function saveFormToStorage() {
   if (!import.meta.client) return
@@ -349,21 +512,26 @@ function saveFormToStorage() {
       scoringCriteria: scoringCriteria.value,
       scoringMode: scoringMode.value,
       autoScoreOnApply: autoScoreOnApply.value,
+      distributeToBoards: distributeToBoards.value,
       currentStep: currentStep.value,
     }
-    localStorage.setItem(AUTO_SAVE_KEY, JSON.stringify(data))
+    localStorage.setItem(autoSaveKey.value, JSON.stringify(data))
   } catch { /* storage full or unavailable */ }
 }
 
 function openDraftPreview() {
   saveFormToStorage()
-  window.open(localePath('/dashboard/jobs/preview'), '_blank', 'noopener,noreferrer')
+  // The mode travels with the link so the preview reads the same key we just wrote.
+  const path = localePath(isTestMode.value
+    ? { path: '/dashboard/jobs/preview', query: { mode: 'test' } }
+    : '/dashboard/jobs/preview')
+  window.open(path, '_blank', 'noopener,noreferrer')
 }
 
 function restoreFormFromStorage() {
   if (!import.meta.client) return
   try {
-    const raw = localStorage.getItem(AUTO_SAVE_KEY)
+    const raw = localStorage.getItem(autoSaveKey.value)
     if (!raw) return
     const data = z.object({
       form: z.unknown().optional(),
@@ -371,6 +539,7 @@ function restoreFormFromStorage() {
       scoringCriteria: z.unknown().optional(),
       scoringMode: z.unknown().optional(),
       autoScoreOnApply: z.unknown().optional(),
+      distributeToBoards: z.unknown().optional(),
       currentStep: z.unknown().optional(),
     }).parse(JSON.parse(raw))
 
@@ -394,6 +563,9 @@ function restoreFormFromStorage() {
     const storedAutoScore = z.boolean().safeParse(data.autoScoreOnApply)
     if (storedAutoScore.success) autoScoreOnApply.value = storedAutoScore.data
 
+    const storedDistribute = z.boolean().safeParse(data.distributeToBoards)
+    if (storedDistribute.success) distributeToBoards.value = storedDistribute.data
+
     const storedStep = z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]).safeParse(data.currentStep)
     currentStep.value = storedStep.success && storedForm.success ? storedStep.data : 1
   } catch { /* corrupted data, ignore */ }
@@ -401,20 +573,110 @@ function restoreFormFromStorage() {
 
 function clearFormStorage() {
   if (!import.meta.client) return
-  try { localStorage.removeItem(AUTO_SAVE_KEY) } catch { /* ignore */ }
+  try { localStorage.removeItem(autoSaveKey.value) } catch { /* ignore */ }
 }
 
-onMounted(() => {
+// ─────────────────────────────────────────────
+// Test mode (?mode=test)
+// ─────────────────────────────────────────────
+
+/**
+ * The walkthrough for someone evaluating Reqcore rather than hiring.
+ *
+ * They are taken through the real wizard on purpose — trying the create-a-job
+ * flow is usually the thing they came to do, so replacing it with a canned
+ * preview would skip the tour. What they are spared is the blank page: every
+ * step arrives filled in with a believable role they can read, edit or click
+ * straight past. That is the step people were faking their way through when
+ * they typed "asdf" into the title to get to the end.
+ *
+ * The `?mode=test` flag itself is declared up with the autosave, which keys off it.
+ */
+
+/** Which steps have played their reveal, so going back doesn't replay it. */
+const revealedSteps = ref(new Set<number>())
+const isRevealing = ref(false)
+
+function applySampleContent() {
+  form.value = { ...SAMPLE_JOB_FORM }
+  applicationForm.value = {
+    phoneRequirement: 'optional',
+    requireResume: true,
+    requireCoverLetter: false,
+    questions: SAMPLE_JOB_QUESTIONS.map(q => ({ id: crypto.randomUUID(), ...q })),
+  }
+  scoringCriteria.value = SAMPLE_SCORING_CRITERIA.map(c => ({ ...c }))
+  scoringMode.value = 'custom'
+  autoScoreOnApply.value = true
+}
+
+/**
+ * Fades the step's newly-filled content in rather than having it appear
+ * instantly, so it reads as the wizard filling itself in for you. Skipped
+ * entirely under `prefers-reduced-motion`, and it never gates interaction —
+ * the fields are live throughout, the animation is only opacity.
+ */
+async function revealStep(step: number) {
+  if (!isTestMode.value || revealedSteps.value.has(step)) return
+  revealedSteps.value.add(step)
+
+  if (import.meta.client && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+
+  isRevealing.value = true
+  await nextTick()
+  setTimeout(() => { isRevealing.value = false }, 480)
+}
+
+watch(currentStep, step => revealStep(step))
+
+/**
+ * Fills the wizard for whichever mode the URL asks for.
+ *
+ * The walkthrough always starts from the sample role, never from its own saved
+ * copy, so it reads the same on every visit. The real wizard picks up whatever
+ * draft was left behind — which is only the recruiter's own work, since the
+ * walkthrough writes to a separate key.
+ */
+function loadForMode() {
+  if (isTestMode.value) {
+    applySampleContent()
+    revealStep(1)
+    track('sample_job_started')
+    return
+  }
   restoreFormFromStorage()
+}
+
+onMounted(loadForMode)
+
+/**
+ * Both modes live on this one page, so switching between them (New Job in the
+ * top bar, a link back to the real wizard) changes the query without
+ * remounting. Without this the sample role would sit in the fields of what is
+ * now a real role, waiting to be deleted by hand.
+ */
+watch(isTestMode, () => {
+  resetFormState()
+  revealedSteps.value.clear()
+  loadForMode()
 })
 
 // Reset all wizard state to initial values (called when user clicks "New Job" again)
 function resetState() {
+  resetFormState()
+  clearFormStorage()
+}
+
+/** The field reset on its own — leaves whatever is in storage alone. */
+function resetFormState() {
   currentStep.value = 1
   form.value = {
     title: '',
     description: '',
-    location: '',
+    locationCity: null,
+    locationRegion: null,
+    locationCountry: null,
+    locationPostalCode: null,
     type: 'full_time',
     experienceLevel: 'mid',
     remoteStatus: undefined,
@@ -427,15 +689,14 @@ function resetState() {
   }
   scoringCriteria.value = []
   scoringMode.value = 'none'
-  autoScoreOnApply.value = false
+  autoScoreOnApply.value = true
+  autoCriteriaState.value = 'idle'
+  distributeToBoards.value = true
   isPublished.value = false
   createdJobId.value = ''
   createdJobSlug.value = ''
   finalApplicationLink.value = ''
   errors.value = {}
-  createdLinks.value = {}
-  customBoardLinks.value = []
-  clearFormStorage()
 }
 
 // Shared signal incremented by AppTopBar when the user is already on this page
@@ -445,7 +706,7 @@ watch(newJobResetSignal, (next, prev) => {
 })
 
 // Auto-save when step changes or form data changes
-watch([currentStep, form, applicationForm, scoringCriteria, scoringMode, autoScoreOnApply], () => {
+watch([currentStep, form, applicationForm, scoringCriteria, scoringMode, autoScoreOnApply, distributeToBoards], () => {
   saveFormToStorage()
 }, { deep: true })
 
@@ -457,131 +718,6 @@ const createdJobSlug = ref('')
 const createdJobId = ref('')
 const finalApplicationLink = ref('')
 const linkCopiedFinal = ref(false)
-
-// Distribution channels for quick tracking link creation
-const distributionGroups = [
-  { key: 'job_board', label: 'Job boards' },
-  { key: 'outreach', label: 'Direct outreach' },
-  { key: 'social', label: 'Social media' },
-] as const
-
-const distributionChannels = [
-  { channel: 'linkedin', name: 'LinkedIn', description: 'Post on LinkedIn Jobs or share in your feed', category: 'job_board' },
-  { channel: 'indeed', name: 'Indeed', description: 'List on the Indeed job board', category: 'job_board' },
-  { channel: 'glassdoor', name: 'Glassdoor', description: 'Publish on Glassdoor listings', category: 'job_board' },
-  { channel: 'ziprecruiter', name: 'ZipRecruiter', description: 'Post on ZipRecruiter', category: 'job_board' },
-  { channel: 'email', name: 'Email campaign', description: 'Send to candidates or mailing list', category: 'outreach' },
-  { channel: 'referral', name: 'Employee referral', description: 'Share internally with your team', category: 'outreach' },
-  { channel: 'career_site', name: 'Career site', description: 'Embed on your company website', category: 'outreach' },
-  { channel: 'twitter', name: 'X (Twitter)', description: 'Share on your X timeline', category: 'social' },
-  { channel: 'facebook', name: 'Facebook', description: 'Post on Facebook page or groups', category: 'social' },
-  { channel: 'reddit', name: 'Reddit', description: 'Share in relevant subreddits', category: 'social' },
-] as const
-
-const channelIcons: Record<string, any> = {
-  linkedin: Briefcase,
-  indeed: Search,
-  glassdoor: Building2,
-  ziprecruiter: Megaphone,
-  email: Mail,
-  referral: Users,
-  career_site: Globe,
-  twitter: Hash,
-  facebook: Users,
-  reddit: MessageSquare,
-}
-
-// Track created distribution links: channel → { code, url, loading, copied }
-const createdLinks = ref<Record<string, { code: string; url: string; loading: boolean; copied: boolean }>>({})
-
-async function createChannelLink(channel: string, channelName: string) {
-  if (createdLinks.value[channel]?.code) return
-  createdLinks.value[channel] = { code: '', url: '', loading: true, copied: false }
-  try {
-    const result = await $fetch<{ id: string; code: string }>('/api/tracking-links', {
-      method: 'POST',
-      body: {
-        jobId: createdJobId.value,
-        channel,
-        name: `${form.value.title} — ${channelName}`,
-      },
-    })
-    const base = `${requestUrl.protocol}//${requestUrl.host}`
-    const trackUrl = `${base}/api/public/track/${encodeURIComponent(result.code)}`
-    createdLinks.value[channel] = { code: result.code, url: trackUrl, loading: false, copied: false }
-    track('tracking_link_created', { channel, source: 'job_wizard' })
-  } catch {
-    delete createdLinks.value[channel]
-    toast.error(`Failed to create tracking link for ${channelName}`)
-  }
-}
-
-async function copyChannelLink(channel: string) {
-  const link = createdLinks.value[channel]
-  if (!link?.url) return
-  try {
-    await navigator.clipboard.writeText(link.url)
-    link.copied = true
-    setTimeout(() => { link.copied = false }, 2500)
-  } catch {
-    toast.info(link.url)
-  }
-}
-
-const createdLinkCount = computed(() =>
-  Object.values(createdLinks.value).filter(l => l.code).length + customBoardLinks.value.length
-)
-
-// Custom job board links
-const customBoardName = ref('')
-const customBoardLinks = ref<Array<{ id: string; name: string; channel: string; code: string; url: string; copied: boolean }>>([])
-const isCreatingCustomBoard = ref(false)
-
-async function createCustomBoardLink() {
-  const name = customBoardName.value.trim()
-  if (!name) return
-  // Use a slug derived from the custom board name for local dedup only
-  const dedupeKey = `custom_${name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 50)}`
-
-  // Prevent duplicates
-  if (customBoardLinks.value.some(l => l.channel === dedupeKey)) {
-    toast.warning('Duplicate board', `A custom link for "${name}" already exists.`)
-    return
-  }
-
-  isCreatingCustomBoard.value = true
-  try {
-    const result = await $fetch<{ id: string; code: string }>('/api/tracking-links', {
-      method: 'POST',
-      body: {
-        jobId: createdJobId.value,
-        channel: 'custom',
-        name: `${form.value.title} — ${name}`,
-      },
-    })
-    const base = `${requestUrl.protocol}//${requestUrl.host}`
-    const trackUrl = `${base}/api/public/track/${encodeURIComponent(result.code)}`
-    customBoardLinks.value.push({ id: result.id, name, channel: dedupeKey, code: result.code, url: trackUrl, copied: false })
-    customBoardName.value = ''
-    track('tracking_link_created', { channel: 'custom', customName: name, source: 'job_wizard_custom' })
-  } catch {
-    toast.error(`Failed to create tracking link for "${name}"`)
-  } finally {
-    isCreatingCustomBoard.value = false
-  }
-}
-
-async function copyCustomBoardLink(index: number) {
-  const link = customBoardLinks.value[index]
-  if (!link?.url) return
-  try {
-    await navigator.clipboard.writeText(link.url)
-    link.copied = true
-    setTimeout(() => { link.copied = false }, 2500)
-  } catch {
-    toast.info(link.url)
-  }
-}
 
 function validateStep1(): boolean {
   const result = formSchema.safeParse(form.value)
@@ -600,21 +736,53 @@ function validateStep1(): boolean {
 // Pure check with no side-effects so it never populates errors on its own
 const isStep1Valid = computed(() => formSchema.safeParse(form.value).success)
 
+/**
+ * What the job boards need before this role can go live: a placeable location
+ * and a description that isn't a stub. A role published without them is live
+ * but invisible, so the wizard asks for them here rather than letting the
+ * recruiter find out from a rejected upload.
+ *
+ * "Save & exit" is the escape hatch — a draft is allowed to be incomplete.
+ */
+const publishBlockers = computed(() => missingPublishRequirements({
+  description: form.value.description,
+  locationCountry: form.value.locationCountry,
+  remoteStatus: form.value.remoteStatus,
+}))
+
+const descriptionChars = computed(() => descriptionLength(form.value.description))
+
+function validatePublishRequirements(): boolean {
+  if (publishBlockers.value.length === 0) return true
+  for (const blocker of publishBlockers.value) {
+    errors.value = { ...errors.value, [blocker.field]: blocker.reason }
+  }
+  return false
+}
+
+/** Everything Job details has to have before the wizard moves past it. */
+function validateJobDetails(): boolean {
+  // Order matters: `validateStep1` clears `errors`, so it has to run first.
+  const schemaValid = validateStep1()
+  const publishReady = validatePublishRequirements()
+  return schemaValid && publishReady
+}
+
 const canGoNext = computed(() => {
-  if (currentStep.value === 1) return isStep1Valid.value
+  if (currentStep.value === 1) return isStep1Valid.value && publishBlockers.value.length === 0
   return true
 })
 
 function goToStep(step: 1 | 2 | 3 | 4) {
   if (step === currentStep.value) return
   // Validate step 1 before leaving it
-  if (currentStep.value === 1 && step > 1 && !validateStep1()) return
+  if (currentStep.value === 1 && step > 1 && !validateJobDetails()) return
   currentStep.value = step
 }
 
 function nextStep() {
   if (currentStep.value < 4) {
-    if (currentStep.value === 1 && !validateStep1()) return
+    if (currentStep.value === 1 && !validateJobDetails()) return
     currentStep.value++
   }
 }
@@ -663,29 +831,10 @@ async function copyApplicationLink() {
 // A published role is automatically listed on the org's branded career page.
 // Surface that page as the primary distribution destination.
 // ─────────────────────────────────────────────
+// The career page link itself is rendered by JobPromotePanel; this flag only
+// drives the upgrade nudge shown to orgs whose plan doesn't include it.
 const { hasFeature: hasPlanFeature } = usePlanFeature()
-const { activeOrg } = useCurrentOrg()
 const canUseCareerPage = computed(() => hasPlanFeature('careerPage'))
-const careerPagePath = computed(() => {
-  const slug = activeOrg.value?.slug
-  return slug ? localePath(`/career/${slug}`) : ''
-})
-const careerPageUrl = computed(() => {
-  if (!careerPagePath.value) return ''
-  return `${requestUrl.protocol}//${requestUrl.host}${careerPagePath.value}`
-})
-const careerPageLinkCopied = ref(false)
-
-async function copyCareerPageLink() {
-  if (!careerPageUrl.value) return
-  try {
-    await navigator.clipboard.writeText(careerPageUrl.value)
-    careerPageLinkCopied.value = true
-    setTimeout(() => { careerPageLinkCopied.value = false }, 2500)
-  } catch {
-    toast.info(careerPageUrl.value)
-  }
-}
 
 async function handleSubmit(mode: 'publish' | 'draft' = publishChoice.value) {
   if (isSubmitting.value) return
@@ -696,13 +845,21 @@ async function handleSubmit(mode: 'publish' | 'draft' = publishChoice.value) {
     return
   }
 
+  if (mode === 'publish' && !validatePublishRequirements()) {
+    currentStep.value = 1
+    return
+  }
+
   const normalizedForm = formSchema.parse(form.value)
   isSubmitting.value = true
   try {
     const created = await createJob({
       title: normalizedForm.title,
       description: normalizedForm.description || undefined,
-      location: normalizedForm.location || undefined,
+      locationCity: normalizedForm.locationCity,
+      locationRegion: normalizedForm.locationRegion,
+      locationCountry: normalizedForm.locationCountry,
+      locationPostalCode: normalizedForm.locationPostalCode,
       type: normalizedForm.type,
       experienceLevel: normalizedForm.experienceLevel,
       remoteStatus: normalizedForm.remoteStatus,
@@ -711,6 +868,8 @@ async function handleSubmit(mode: 'publish' | 'draft' = publishChoice.value) {
       requireCoverLetter: applicationForm.value.requireCoverLetter,
       autoScoreOnApply: scoringCriteria.value.length > 0 && autoScoreOnApply.value,
       status: mode === 'publish' ? 'open' : 'draft',
+      distributeToBoards: distributeToBoards.value,
+      isTest: isTestMode.value,
       questions: applicationForm.value.questions.map((question, index) => ({
         label: question.label,
         type: question.type,
@@ -742,6 +901,33 @@ async function handleSubmit(mode: 'publish' | 'draft' = publishChoice.value) {
 
       track('job_published')
 
+      // The payoff. A walkthrough that ends on an empty pipeline has shown a
+      // form, not a product — so the test role arrives already holding a ranked
+      // shortlist, and we take them straight to it rather than to a share link
+      // they have nobody to send.
+      if (isTestMode.value) {
+        isPopulatingSample.value = true
+        try {
+          await $fetch(`/api/jobs/${created.id}/sample-applicants`, { method: 'POST' })
+          track('sample_job_published')
+          await navigateTo(localePath(`/dashboard/jobs/${created.id}`))
+          return
+        } catch {
+          // The job itself is real and saved; only its sample applicants failed.
+          // Send them to it anyway rather than stranding them in the wizard.
+          toast.add({
+            type: 'warning',
+            title: 'Test job created',
+            message: 'We could not add the sample applicants this time.',
+          })
+          await navigateTo(localePath(`/dashboard/jobs/${created.id}`))
+          return
+        } finally {
+          isPopulatingSample.value = false
+          clearFormStorage()
+        }
+      }
+
       // Auto-copy to clipboard
       try {
         await navigator.clipboard.writeText(finalApplicationLink.value)
@@ -767,6 +953,13 @@ async function handleSubmit(mode: 'publish' | 'draft' = publishChoice.value) {
       track('job_limit_upsell_shown')
       return
     }
+    // The publish guard names the field that fixes it, so send the recruiter
+    // back to Job details with the message on that input.
+    const blockedField = err?.data?.data?.field
+    if (blockedField) {
+      errors.value = { ...errors.value, [blockedField]: err.data.statusMessage }
+      currentStep.value = 1
+    }
     const statusMessage = err?.data?.statusMessage ?? 'Something went wrong while creating the job.'
     toast.error('Failed to create job', {
       message: statusMessage,
@@ -782,17 +975,6 @@ async function handleSubmit(mode: 'publish' | 'draft' = publishChoice.value) {
 async function saveAsDraftFromUpsell() {
   showLimitUpsell.value = false
   await handleSubmit('draft')
-}
-
-async function copyFinalLink() {
-  try {
-    await navigator.clipboard.writeText(finalApplicationLink.value)
-    linkCopiedFinal.value = true
-    setTimeout(() => { linkCopiedFinal.value = false }, 3000)
-  } catch {
-    // fallback: show the link so the user can copy manually
-    toast.info(finalApplicationLink.value)
-  }
 }
 
 const typeOptions = [
@@ -833,7 +1015,12 @@ const typeOptions = [
                     : 'bg-white dark:bg-surface-900 text-surface-400 dark:text-surface-500 border-surface-200 dark:border-surface-800'
               ]"
             >
-              <span v-if="currentStep > step.id" class="text-xs">&#10003;</span>
+              <!-- Step 3 is being written in the background while you fill in step 2. -->
+              <Loader2
+                v-if="step.id === 3 && currentStep !== 3 && autoCriteriaState === 'running'"
+                class="size-3 animate-spin text-brand-500 dark:text-brand-400"
+              />
+              <span v-else-if="currentStep > step.id" class="text-xs">&#10003;</span>
               <span v-else>{{ step.id }}</span>
             </div>
             <span
@@ -883,13 +1070,42 @@ const typeOptions = [
         class="min-w-0 space-y-6 xl:min-h-0 xl:overflow-y-auto xl:overscroll-contain xl:pb-1 xl:pr-1"
       >
 
+        <!--
+          Test-mode framing. Stated once, up front, so nothing further down has
+          to keep re-explaining why the fields are already filled in.
+        -->
+        <div
+          v-if="isTestMode"
+          class="flex items-start gap-3 rounded-xl border border-brand-200 bg-brand-50/70 p-4 dark:border-brand-900 dark:bg-brand-950/30"
+        >
+          <span class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-brand-100 text-brand-700 dark:bg-brand-900/60 dark:text-brand-300">
+            <FlaskConical class="size-4" />
+          </span>
+          <div class="min-w-0 text-sm">
+            <p class="font-semibold text-surface-900 dark:text-surface-100">You're creating a test job</p>
+            <p class="mt-1 leading-relaxed text-surface-600 dark:text-surface-300">
+              Every step is filled in with an example role — change anything you like, or just keep clicking through.
+              It stays inside your workspace: never on the public job board, your career page, or any job board.
+              When you publish, sample applicants land in it so you can see the ranking.
+            </p>
+          </div>
+        </div>
+
         <div class="rounded-xl border border-surface-200 dark:border-surface-800 bg-white dark:bg-surface-900 shadow-sm overflow-hidden">
-          <form @submit.prevent="() => handleSubmit()" class="p-5 md:p-6">
+          <form
+            @submit.prevent="() => handleSubmit()"
+            class="p-5 md:p-6"
+            :class="isRevealing ? 'sample-reveal' : ''"
+          >
             <!-- Step 1: Job details -->
             <section v-if="currentStep === 1" class="space-y-6">
               <div>
                 <h2 class="text-lg font-semibold text-surface-900 dark:text-surface-100">Job details</h2>
-                <p class="text-sm text-surface-500 dark:text-surface-400 mt-1">Only the job title is required — everything else can be added later.</p>
+                <p class="text-sm text-surface-500 dark:text-surface-400 mt-1">
+                  Title, location and description are what job boards need to accept this role. Everything else is optional — and you can
+                  <button type="button" class="font-medium underline underline-offset-2 hover:text-surface-700 dark:hover:text-surface-200" @click="handleSubmit('draft')">save an incomplete draft</button>
+                  at any point.
+                </p>
               </div>
 
               <!-- Title -->
@@ -910,21 +1126,51 @@ const typeOptions = [
                 <p v-if="errors.title" class="mt-1.5 text-xs text-danger-600 dark:text-danger-400 font-medium">{{ errors.title }}</p>
               </div>
 
-              <!-- Location + employment type -->
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
-                <div>
+              <!-- Location + postal code -->
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+                <div class="md:col-span-2">
                   <label for="location" class="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
-                    Location
+                    Location <span class="text-danger-500">*</span>
+                  </label>
+                  <LocationCombobox
+                    id="location"
+                    v-model="locationSelection"
+                    :invalid="!!errors.locationCountry"
+                  />
+                  <p v-if="errors.locationCountry" class="mt-1.5 text-xs text-danger-600 dark:text-danger-400 font-medium">
+                    {{ errors.locationCountry }}
+                  </p>
+                  <p v-else class="mt-1.5 text-xs text-surface-500">Boards place listings by country. For a role with no base, set Workplace to Remote instead.</p>
+                </div>
+                <!-- Always on the row so the field is never missing, but inert
+                     until a place is picked: the API drops a postal code with no
+                     country, so accepting one first would silently lose it. -->
+                <div>
+                  <label for="location-postal-code" class="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
+                    Postal code <span class="font-normal text-surface-400">(optional)</span>
                   </label>
                   <input
-                    id="location"
-                    v-model="form.location"
+                    id="location-postal-code"
+                    v-model="form.locationPostalCode"
                     type="text"
-                    maxlength="500"
-                    placeholder="e.g. New York, NY"
-                    class="w-full rounded-lg border px-3 py-2.5 text-sm text-surface-900 dark:text-surface-100 bg-white dark:bg-surface-900 placeholder:text-surface-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-colors border-surface-300 dark:border-surface-700"
+                    :maxlength="POSTAL_CODE_MAX_LENGTH"
+                    :disabled="!form.locationCountry"
+                    autocomplete="postal-code"
+                    placeholder="e.g. 0150"
+                    class="w-full rounded-lg border px-3 py-2.5 text-sm text-surface-900 dark:text-surface-100 bg-white dark:bg-surface-900 placeholder:text-surface-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                    :class="errors.locationPostalCode ? 'border-danger-300 ring-1 ring-danger-100' : 'border-surface-300 dark:border-surface-700'"
+                    @blur="validateStep1"
                   />
+                  <p v-if="errors.locationPostalCode" class="mt-1.5 text-xs text-danger-600 dark:text-danger-400 font-medium">
+                    {{ errors.locationPostalCode }}
+                  </p>
+                  <p v-else-if="!form.locationCountry" class="mt-1.5 text-xs text-surface-500">Pick a location first.</p>
+                  <p v-else class="mt-1.5 text-xs text-surface-500">Puts the role in local "jobs near me" searches.</p>
                 </div>
+              </div>
+
+              <!-- Employment type + experience + remote -->
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
                 <div>
                   <label for="type" class="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
                     Employment type
@@ -939,10 +1185,6 @@ const typeOptions = [
                     </option>
                   </select>
                 </div>
-              </div>
-
-              <!-- Experience + remote -->
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <div>
                   <label for="experienceLevel" class="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">Experience level</label>
                   <select
@@ -974,16 +1216,26 @@ const typeOptions = [
               <!-- Description -->
               <div>
                 <label for="description" class="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
-                  Description
+                  Description <span class="text-danger-500">*</span>
                 </label>
                 <textarea
                   id="description"
                   v-model="form.description"
                   rows="8"
                   placeholder="Describe the role, responsibilities, and requirements…"
-                  class="w-full rounded-lg border px-4 py-3 text-sm text-surface-900 dark:text-surface-100 bg-white dark:bg-surface-900 placeholder:text-surface-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-colors border-surface-300 dark:border-surface-700"
+                  class="w-full rounded-lg border px-4 py-3 text-sm text-surface-900 dark:text-surface-100 bg-white dark:bg-surface-900 placeholder:text-surface-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-colors"
+                  :class="errors.description ? 'border-danger-300 ring-1 ring-danger-100' : 'border-surface-300 dark:border-surface-700'"
                 />
-                <p class="mt-1.5 text-xs text-surface-500">A clear description improves AI scoring and attracts better candidates.</p>
+                <div class="mt-1.5 flex items-start justify-between gap-3">
+                  <p v-if="errors.description" class="text-xs text-danger-600 dark:text-danger-400 font-medium">{{ errors.description }}</p>
+                  <p v-else class="text-xs text-surface-500">A clear description improves AI scoring and attracts better candidates.</p>
+                  <span
+                    class="shrink-0 text-xs tabular-nums"
+                    :class="descriptionChars < MIN_DESCRIPTION_CHARS ? 'text-surface-400 dark:text-surface-500' : 'text-success-600 dark:text-success-400'"
+                  >
+                    {{ Math.min(descriptionChars, MIN_DESCRIPTION_CHARS) }} / {{ MIN_DESCRIPTION_CHARS }}
+                  </span>
+                </div>
               </div>
             </section>
 
@@ -995,6 +1247,25 @@ const typeOptions = [
                 :job-title="form.title"
                 :show-preview="false"
               />
+
+              <!--
+                One line, no card: the scoring step is being written from the job
+                description while this step is open, so it does not arrive
+                unexplained.
+              -->
+              <p
+                v-if="autoCriteriaState === 'running' || autoCriteriaState === 'done'"
+                class="mt-8 flex items-center gap-2 text-xs text-surface-500 dark:text-surface-400"
+              >
+                <template v-if="autoCriteriaState === 'running'">
+                  <Loader2 class="size-3.5 shrink-0 animate-spin text-brand-500 dark:text-brand-400" />
+                  AI is reading your job description to write scoring criteria for step 3.
+                </template>
+                <template v-else>
+                  <Sparkles class="size-3.5 shrink-0 text-brand-500 dark:text-brand-400" />
+                  Scoring criteria written from your job description — review them in step 3.
+                </template>
+              </p>
             </section>
 
             <!-- Step 3: AI scoring criteria -->
@@ -1007,12 +1278,33 @@ const typeOptions = [
                 </div>
                 <p class="text-sm text-surface-500 dark:text-surface-400 mt-1">
                   <span class="font-medium text-surface-700 dark:text-surface-300">This step is optional — you can skip it and set up scoring later from job settings.</span>
-                  If you'd like AI to score and rank every applicant, we've recommended a set of criteria for this role below; use it as-is or customize.
+                  Every applicant is ranked against the criteria below. They're written from your job description, so read them over and change anything that doesn't fit.
                 </p>
               </div>
 
+                <!-- Criteria being written from the description -->
+                <div
+                  v-if="autoCriteriaState === 'running' && scoringCriteria.length === 0 && !showAdvanced"
+                  class="rounded-2xl border border-brand-200/80 dark:border-brand-800/60 bg-gradient-to-br from-brand-50 via-white to-white dark:from-brand-950/40 dark:via-surface-900 dark:to-surface-900 p-6 shadow-sm"
+                >
+                  <div class="flex items-start gap-4">
+                    <div class="inline-flex items-center justify-center size-11 rounded-xl bg-gradient-to-br from-brand-500 to-brand-600 text-white shadow-sm shadow-brand-600/20 shrink-0">
+                      <Loader2 class="size-5 animate-spin" />
+                    </div>
+                    <div class="flex-1 min-w-0">
+                      <h3 class="text-base font-semibold text-surface-900 dark:text-surface-100">Writing scoring criteria</h3>
+                      <p class="text-sm text-surface-500 dark:text-surface-400 mt-1 leading-relaxed">
+                        Reading your job description to work out what actually matters for this role.
+                      </p>
+                      <div class="flex flex-wrap gap-2 mt-4">
+                        <span v-for="n in 4" :key="n" class="h-6 w-28 animate-pulse rounded-lg bg-surface-100 dark:bg-surface-800" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 <!-- Recommended default: one-click, zero decisions -->
-                <div v-if="scoringCriteria.length === 0 && !showAdvanced" class="space-y-5">
+                <div v-else-if="scoringCriteria.length === 0 && !showAdvanced" class="space-y-5">
                   <div class="relative overflow-hidden rounded-2xl border border-brand-200/80 dark:border-brand-800/60 bg-gradient-to-br from-brand-50 via-white to-white dark:from-brand-950/40 dark:via-surface-900 dark:to-surface-900 p-6 shadow-sm">
                     <!-- Decorative glow -->
                     <div class="pointer-events-none absolute -right-16 -top-16 size-48 rounded-full bg-brand-200/30 dark:bg-brand-700/10 blur-3xl" />
@@ -1223,16 +1515,28 @@ const typeOptions = [
                       <ArrowLeft class="size-3.5" />
                       Back to options
                     </button>
-                    <h3 class="text-sm font-semibold text-surface-800 dark:text-surface-200">
-                      {{ scoringCriteria.length }} {{ scoringCriteria.length === 1 ? 'criterion' : 'criteria' }} configured
-                    </h3>
+                    <div class="flex items-center gap-2">
+                      <!-- Where the list came from, in the row that was already there. -->
+                      <span
+                        v-if="autoCriteriaState === 'done'"
+                        class="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-semibold text-brand-700 ring-1 ring-inset ring-brand-200 dark:bg-brand-950/60 dark:text-brand-300 dark:ring-brand-800"
+                        title="AI read your job description and wrote these criteria. Edit the weights, remove any that don't fit, or use “Back to options” for a template instead."
+                      >
+                        <Sparkles class="size-3" />
+                        Written by AI from your description
+                      </span>
+                      <h3 class="text-sm font-semibold text-surface-800 dark:text-surface-200">
+                        {{ scoringCriteria.length }} {{ scoringCriteria.length === 1 ? 'criterion' : 'criteria' }} configured
+                      </h3>
+                    </div>
                   </div>
 
-                  <div class="space-y-3">
+                  <div class="space-y-3" :class="criteriaRevealing && 'criteria-reveal'">
                     <div
-                      v-for="criterion in scoringCriteria"
+                      v-for="(criterion, criterionIndex) in scoringCriteria"
                       :key="criterion.key"
                       class="rounded-xl border border-surface-200 dark:border-surface-800 bg-white dark:bg-surface-950 p-4 transition-all hover:shadow-sm"
+                      :style="criteriaRevealing ? { animationDelay: `${Math.min(criterionIndex, 8) * 70}ms` } : undefined"
                     >
                       <div class="flex items-start justify-between gap-3 mb-3">
                         <div class="flex-1 min-w-0">
@@ -1419,73 +1723,9 @@ const typeOptions = [
                   </NuxtLink>
                 </div>
 
-                <!-- Direct application link -->
-                <div class="rounded-xl border border-surface-200 dark:border-surface-800 bg-surface-50 dark:bg-surface-900/50 p-5">
-                  <div class="flex items-center gap-2 mb-3">
-                    <Link2 class="size-4 text-surface-500 dark:text-surface-400" />
-                    <span class="text-sm font-semibold text-surface-700 dark:text-surface-300">Direct application link</span>
-                    <span class="text-xs text-surface-400 dark:text-surface-500">(no tracking)</span>
-                  </div>
-                  <div class="flex items-center gap-2">
-                    <input
-                      type="text"
-                      readonly
-                      :value="finalApplicationLink"
-                      class="flex-1 rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 px-3 py-2 text-sm text-surface-600 dark:text-surface-400 select-all font-mono"
-                    />
-                    <button
-                      type="button"
-                      class="inline-flex items-center gap-1.5 rounded-lg bg-surface-200 dark:bg-surface-700 px-4 py-2 text-sm font-medium text-surface-700 dark:text-surface-300 hover:bg-surface-300 dark:hover:bg-surface-600 transition-colors shrink-0"
-                      @click="copyFinalLink"
-                    >
-                      <Copy class="size-3.5" />
-                      {{ linkCopiedFinal ? 'Copied!' : 'Copy' }}
-                    </button>
-                  </div>
-                </div>
-
-                <!-- Career page — primary distribution destination -->
-                <div
-                  v-if="canUseCareerPage && careerPageUrl"
-                  class="rounded-xl border border-brand-200 dark:border-brand-800 bg-brand-50/60 dark:bg-brand-950/20 p-5"
-                >
-                  <div class="flex items-center gap-2 mb-1">
-                    <Globe2 class="size-4 text-brand-600 dark:text-brand-400" />
-                    <span class="text-sm font-semibold text-surface-900 dark:text-surface-100">Your career page</span>
-                    <span class="text-xs text-surface-400 dark:text-surface-500">— this role is already listed there</span>
-                  </div>
-                  <p class="text-sm text-surface-500 dark:text-surface-400 mb-3">
-                    Share one branded link instead of pasting job ads everywhere. All your open roles live here.
-                  </p>
-                  <div class="flex items-center gap-2">
-                    <input
-                      type="text"
-                      readonly
-                      :value="careerPageUrl"
-                      class="flex-1 rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 px-3 py-2 text-sm text-surface-600 dark:text-surface-400 select-all font-mono"
-                    >
-                    <button
-                      type="button"
-                      class="inline-flex items-center gap-1.5 rounded-lg bg-surface-200 dark:bg-surface-700 px-4 py-2 text-sm font-medium text-surface-700 dark:text-surface-300 hover:bg-surface-300 dark:hover:bg-surface-600 transition-colors shrink-0"
-                      @click="copyCareerPageLink"
-                    >
-                      <Copy class="size-3.5" />
-                      {{ careerPageLinkCopied ? 'Copied!' : 'Copy' }}
-                    </button>
-                    <NuxtLink
-                      :to="careerPagePath"
-                      target="_blank"
-                      class="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 transition-colors shrink-0 no-underline"
-                    >
-                      <ExternalLink class="size-3.5" />
-                      Open
-                    </NuxtLink>
-                  </div>
-                </div>
-
                 <!-- Career page upgrade nudge (free orgs) -->
                 <div
-                  v-else-if="!canUseCareerPage"
+                  v-if="!canUseCareerPage"
                   class="flex items-start gap-3 rounded-xl border border-brand-200 dark:border-brand-900/60 bg-brand-50/60 dark:bg-brand-950/20 px-5 py-4"
                 >
                   <div class="flex size-8 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-brand-500 to-violet-600 text-white">
@@ -1507,179 +1747,9 @@ const typeOptions = [
                   </NuxtLink>
                 </div>
 
-                <!-- Distribution hub -->
-                <div>
-                  <div class="flex items-center gap-3 mb-2">
-                    <Share2 class="size-5 text-brand-600 dark:text-brand-400" />
-                    <h3 class="text-lg font-semibold text-surface-900 dark:text-surface-100">Share &amp; track</h3>
-                  </div>
-                  <p class="text-sm text-surface-500 dark:text-surface-400 mb-6">
-                    Create tracked links for each platform. This lets you see exactly where your applicants come from.
-                  </p>
-
-                  <!-- Channel groups -->
-                  <div
-                    v-for="group in distributionGroups"
-                    :key="group.key"
-                    class="mb-6"
-                  >
-                    <h4 class="text-xs font-semibold uppercase tracking-wider text-surface-400 dark:text-surface-500 mb-3">{{ group.label }}</h4>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      <div
-                        v-for="ch in distributionChannels.filter(c => c.category === group.key)"
-                        :key="ch.channel"
-                        class="rounded-xl border border-surface-200 dark:border-surface-800 bg-white dark:bg-surface-950 p-4 transition-all"
-                        :class="createdLinks[ch.channel]?.code ? 'ring-1 ring-brand-200 dark:ring-brand-800 border-brand-200 dark:border-brand-800' : ''"
-                      >
-                        <div class="flex items-start gap-3">
-                          <div class="inline-flex items-center justify-center size-9 rounded-lg bg-surface-100 dark:bg-surface-800 shrink-0">
-                            <component :is="channelIcons[ch.channel] ?? Globe" class="size-4 text-surface-500 dark:text-surface-400" />
-                          </div>
-                          <div class="flex-1 min-w-0">
-                            <span class="block text-sm font-semibold text-surface-900 dark:text-surface-100">{{ ch.name }}</span>
-                            <span class="text-xs text-surface-400 dark:text-surface-500">{{ ch.description }}</span>
-                          </div>
-                        </div>
-
-                        <!-- Not yet created -->
-                        <div v-if="!createdLinks[ch.channel]" class="mt-3">
-                          <button
-                            type="button"
-                            class="w-full inline-flex items-center justify-center gap-1.5 rounded-lg border border-brand-200 dark:border-brand-800 bg-brand-50 dark:bg-brand-950/30 px-3 py-2 text-xs font-medium text-brand-700 dark:text-brand-300 hover:bg-brand-100 dark:hover:bg-brand-900/50 transition-colors"
-                            @click="createChannelLink(ch.channel, ch.name)"
-                          >
-                            <Plus class="size-3.5" />
-                            Create tracking link
-                          </button>
-                        </div>
-
-                        <!-- Loading -->
-                        <div v-else-if="createdLinks[ch.channel]?.loading" class="mt-3 flex items-center justify-center gap-2 py-2">
-                          <Loader2 class="size-3.5 text-brand-600 animate-spin" />
-                          <span class="text-xs text-surface-500">Creating...</span>
-                        </div>
-
-                        <!-- Created - show URL -->
-                        <div v-else class="mt-3 space-y-2">
-                          <div class="flex items-center gap-1.5">
-                            <input
-                              type="text"
-                              readonly
-                              :value="createdLinks[ch.channel]?.url"
-                              class="flex-1 rounded-md border border-surface-200 dark:border-surface-700 bg-surface-50 dark:bg-surface-900 px-2.5 py-1.5 text-xs text-surface-600 dark:text-surface-400 select-all font-mono truncate"
-                            />
-                            <button
-                              type="button"
-                              class="inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors shrink-0"
-                              :class="createdLinks[ch.channel]?.copied
-                                ? 'bg-success-100 dark:bg-success-900/50 text-success-700 dark:text-success-300'
-                                : 'bg-brand-600 text-white hover:bg-brand-700'"
-                              @click="copyChannelLink(ch.channel)"
-                            >
-                              <Check v-if="createdLinks[ch.channel]?.copied" class="size-3" />
-                              <Copy v-else class="size-3" />
-                              {{ createdLinks[ch.channel]?.copied ? 'Copied!' : 'Copy' }}
-                            </button>
-                          </div>
-                          <p class="flex items-center gap-1 text-[11px] text-success-600 dark:text-success-400">
-                            <Check class="size-3" />
-                            Clicks and applications from this link will be tracked
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <!-- Custom job board -->
-                  <div class="mb-6">
-                    <h4 class="text-xs font-semibold uppercase tracking-wider text-surface-400 dark:text-surface-500 mb-3">Custom job board</h4>
-                    <p class="text-sm text-surface-500 dark:text-surface-400 mb-3">
-                      Create a tracked link for any platform not listed above.
-                    </p>
-
-                    <!-- Add custom board form -->
-                    <div class="flex items-center gap-2 mb-4">
-                      <input
-                        v-model="customBoardName"
-                        type="text"
-                        placeholder="e.g. Hacker News, AngelList, Niche Board"
-                        class="flex-1 rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 px-3 py-2 text-sm text-surface-700 dark:text-surface-300 placeholder-surface-400 dark:placeholder-surface-500 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none"
-                        @keydown.enter.prevent="createCustomBoardLink"
-                      />
-                      <button
-                        type="button"
-                        class="inline-flex items-center gap-1.5 rounded-lg border border-brand-200 dark:border-brand-800 bg-brand-50 dark:bg-brand-950/30 px-4 py-2 text-sm font-medium text-brand-700 dark:text-brand-300 hover:bg-brand-100 dark:hover:bg-brand-900/50 transition-colors shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
-                        :disabled="!customBoardName.trim() || isCreatingCustomBoard"
-                        @click="createCustomBoardLink"
-                      >
-                        <Loader2 v-if="isCreatingCustomBoard" class="size-3.5 animate-spin" />
-                        <Plus v-else class="size-3.5" />
-                        Create link
-                      </button>
-                    </div>
-
-                    <!-- Created custom board links -->
-                    <div v-if="customBoardLinks.length" class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      <div
-                        v-for="(cbl, idx) in customBoardLinks"
-                        :key="cbl.channel"
-                        class="rounded-xl border border-surface-200 dark:border-surface-800 bg-white dark:bg-surface-950 p-4 ring-1 ring-brand-200 dark:ring-brand-800 border-brand-200 dark:border-brand-800"
-                      >
-                        <div class="flex items-start gap-3">
-                          <div class="inline-flex items-center justify-center size-9 rounded-lg bg-surface-100 dark:bg-surface-800 shrink-0">
-                            <Globe class="size-4 text-surface-500 dark:text-surface-400" />
-                          </div>
-                          <div class="flex-1 min-w-0">
-                            <span class="block text-sm font-semibold text-surface-900 dark:text-surface-100">{{ cbl.name }}</span>
-                            <span class="text-xs text-surface-400 dark:text-surface-500">Custom job board</span>
-                          </div>
-                        </div>
-                        <div class="mt-3 space-y-2">
-                          <div class="flex items-center gap-1.5">
-                            <input
-                              type="text"
-                              readonly
-                              :value="cbl.url"
-                              class="flex-1 rounded-md border border-surface-200 dark:border-surface-700 bg-surface-50 dark:bg-surface-900 px-2.5 py-1.5 text-xs text-surface-600 dark:text-surface-400 select-all font-mono truncate"
-                            />
-                            <button
-                              type="button"
-                              class="inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors shrink-0"
-                              :class="cbl.copied
-                                ? 'bg-success-100 dark:bg-success-900/50 text-success-700 dark:text-success-300'
-                                : 'bg-brand-600 text-white hover:bg-brand-700'"
-                              @click="copyCustomBoardLink(idx)"
-                            >
-                              <Check v-if="cbl.copied" class="size-3" />
-                              <Copy v-else class="size-3" />
-                              {{ cbl.copied ? 'Copied!' : 'Copy' }}
-                            </button>
-                          </div>
-                          <p class="flex items-center gap-1 text-[11px] text-success-600 dark:text-success-400">
-                            <Check class="size-3" />
-                            Clicks and applications from this link will be tracked
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <!-- Summary and link to full dashboard -->
-                  <div class="rounded-xl border border-surface-200 dark:border-surface-800 bg-surface-50 dark:bg-surface-900/50 p-4">
-                    <div class="flex items-center gap-3">
-                      <BarChart3 class="size-5 text-surface-400 dark:text-surface-500 shrink-0" />
-                      <div class="flex-1">
-                        <p class="text-sm text-surface-700 dark:text-surface-300">
-                          <span v-if="createdLinkCount > 0">
-                            {{ createdLinkCount }} tracking {{ createdLinkCount === 1 ? 'link' : 'links' }} created.
-                          </span>
-                          View all analytics and manage links in the
-                          <NuxtLink :to="$localePath('/dashboard/source-tracking')" class="text-brand-600 dark:text-brand-400 font-medium underline underline-offset-2">Source Tracking dashboard</NuxtLink>.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
+                <!-- Distribution hub. Shared with the Promote tab so the whole
+                     surface survives leaving this page. -->
+                <JobPromotePanel v-if="createdJobId" :job-id="createdJobId" compact />
 
                 <!-- Action buttons -->
                 <div class="flex items-center justify-between pt-6 border-t border-surface-100 dark:border-surface-800">
@@ -1697,6 +1767,33 @@ const typeOptions = [
                     Go to dashboard
                   </NuxtLink>
                 </div>
+              </div>
+
+              <!--
+                Test mode has no publish-or-draft decision to make: the role is
+                not going anywhere public either way, so offering the choice
+                would only be a question with no consequence. The one button
+                leads where the walkthrough was always heading.
+              -->
+              <div v-else-if="isTestMode">
+                <h2 class="text-lg font-semibold text-surface-900 dark:text-surface-100 mb-2 pb-2 border-b border-surface-100 dark:border-surface-800">Ready to see it work?</h2>
+                <p class="text-sm text-surface-500 dark:text-surface-400 mb-6">
+                  Your test job opens inside your workspace, and a handful of sample applicants apply to it straight away — already scored against the criteria you just set. A knockout rule on the first question rejects the ones with under a year of experience before they are scored. Nothing is published anywhere public.
+                </p>
+
+                <button
+                  type="submit"
+                  :disabled="isSubmitting || isPopulatingSample"
+                  class="flex w-full items-center justify-center gap-2 rounded-lg bg-brand-600 px-4 py-3.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:opacity-60"
+                >
+                  <Loader2 v-if="isSubmitting || isPopulatingSample" class="size-4 animate-spin" />
+                  <Sparkles v-else class="size-4" />
+                  {{ isPopulatingSample ? 'Bringing in applicants…' : isSubmitting ? 'Creating your test job…' : 'Create test job and see applicants' }}
+                </button>
+
+                <p class="mt-3 text-center text-xs text-surface-400 dark:text-surface-500">
+                  You can delete this job and its sample applicants at any time.
+                </p>
               </div>
 
               <!-- Pre-publish state: choose publish or draft -->
@@ -1760,6 +1857,49 @@ const typeOptions = [
                   </button>
                 </div>
 
+                <!-- Syndication is opt-out, not automatic. Placed with the
+                     publish decision because that is the moment it takes
+                     effect, and because a role sent to the aggregators cannot
+                     be recalled from them on the same day it goes out. -->
+                <label
+                  v-if="publishChoice === 'publish'"
+                  class="mb-8 flex cursor-pointer items-start gap-3 rounded-xl border border-surface-200 dark:border-surface-800 bg-surface-50 dark:bg-surface-900/50 p-5"
+                >
+                  <input
+                    v-model="distributeToBoards"
+                    type="checkbox"
+                    class="mt-0.5 size-4 shrink-0 rounded border-surface-300 dark:border-surface-600 text-brand-600 focus:ring-brand-500"
+                  />
+                  <div>
+                    <span class="flex items-center gap-1.5 text-sm font-medium text-surface-900 dark:text-surface-100">
+                      <Globe2 class="size-3.5 text-surface-400" />
+                      Also list on external job boards
+                    </span>
+                    <p class="mt-1 text-xs leading-relaxed text-surface-500 dark:text-surface-400">
+                      Free syndication to Jooble, Adzuna, Careerjet, Talent.com and others.
+                      Turn it off for a confidential or internal-only search — the role still
+                      gets its application link and its place on your career page.
+                    </p>
+                  </div>
+                </label>
+
+                <!-- Publishing while these are unmet would put the role live but
+                     invisible on every job board. Say so here rather than
+                     bouncing the user back to step 1 on submit. -->
+                <div
+                  v-if="publishChoice === 'publish' && publishBlockers.length"
+                  class="flex items-start gap-2.5 rounded-xl border border-warning-200 dark:border-warning-900 bg-warning-50 dark:bg-warning-950/30 p-4"
+                >
+                  <Globe2 class="size-4 shrink-0 mt-0.5 text-warning-600 dark:text-warning-400" />
+                  <div class="text-xs leading-relaxed text-warning-800 dark:text-warning-300">
+                    <p>This role isn't ready for job boards yet:</p>
+                    <ul class="mt-1.5 list-disc space-y-1 pl-4">
+                      <li v-for="blocker in publishBlockers" :key="blocker.code">{{ blocker.reason }}</li>
+                    </ul>
+                    <button type="button" class="mt-2 font-semibold underline" @click="goToStep(1)">Fix in Job details</button>
+                  </div>
+                </div>
+
                 <!-- Summary of what was configured -->
                 <div class="rounded-xl border border-surface-200 dark:border-surface-800 bg-surface-50 dark:bg-surface-900/50 p-5">
                   <h3 class="text-sm font-semibold text-surface-700 dark:text-surface-300 mb-4">Job summary</h3>
@@ -1770,11 +1910,11 @@ const typeOptions = [
                       </dt>
                       <dd class="text-surface-900 dark:text-surface-100 font-medium">{{ form.title }}</dd>
                     </div>
-                    <div v-if="form.location" class="flex items-start gap-3">
+                    <div v-if="locationDisplay" class="flex items-start gap-3">
                       <dt class="flex items-center gap-1.5 text-surface-500 dark:text-surface-400 shrink-0 w-32">
                         <Link2 class="size-3.5" /> Location
                       </dt>
-                      <dd class="text-surface-900 dark:text-surface-100">{{ form.location }}</dd>
+                      <dd class="text-surface-900 dark:text-surface-100">{{ locationDisplay }}</dd>
                     </div>
                     <div class="flex items-start gap-3">
                       <dt class="flex items-center gap-1.5 text-surface-500 dark:text-surface-400 shrink-0 w-32">
@@ -1859,7 +1999,7 @@ const typeOptions = [
       >
         <ApplicationBuilderPreview
           :application-form="applicationForm"
-          :job-details="form"
+          :job-details="previewJobDetails"
           max-height="100%"
         />
       </aside>
@@ -1879,5 +2019,58 @@ const typeOptions = [
 <style scoped>
 button:not(:disabled) {
   cursor: pointer;
+}
+
+/*
+ * Test mode only: each step's pre-filled content settles in rather than
+ * snapping, so the wizard reads as filling itself in for you. Opacity and a
+ * small offset only — nothing here moves layout or blocks input, so the fields
+ * stay usable for the whole 420ms.
+ */
+.sample-reveal :deep(section) {
+  animation: sample-reveal 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes sample-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sample-reveal :deep(section) {
+    animation: none;
+  }
+}
+
+/*
+ * Step 3's criteria are written while step 2 is open, so they would otherwise be
+ * sitting there fully formed on arrival. Each card settles in one after the
+ * other instead — opacity and a few pixels, nothing that blocks editing.
+ */
+.criteria-reveal > * {
+  animation: criteria-reveal 340ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes criteria-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .criteria-reveal > * {
+    animation: none;
+  }
 }
 </style>
