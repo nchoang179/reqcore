@@ -173,10 +173,27 @@ docker compose --profile tools up
 # System: PostgreSQL  |  Server: db  |  Username & Password: from your .env
 ```
 
+### Running behind a reverse proxy
+
+Rate limiting is keyed on the client IP, so the app has to know which forwarding
+headers it may believe. Set `TRUSTED_PROXY` in `.env`:
+
+| Your setup | Value |
+|------------|-------|
+| Behind Cloudflare | `TRUSTED_PROXY=cloudflare` |
+| Behind one proxy you run (nginx, Caddy, Traefik) | `TRUSTED_PROXY=1` (the number of proxies that append to `X-Forwarded-For`) |
+| Reachable directly from the internet | `TRUSTED_PROXY=none` |
+
+The default is `cloudflare`, which matches the hosted deployment. Leaving it on
+`cloudflare` while the app is directly reachable lets a client pick its own
+rate-limit bucket by sending a `CF-Connecting-IP` header; setting it to `none`
+while behind a proxy puts every visitor in a single shared bucket.
+
 ## Troubleshooting
 
 | Problem | What to do |
 |---------|-----------|
+| Applicants get "Too many applications submitted" unexpectedly | `TRUSTED_PROXY` doesn't match your setup — see [Running behind a reverse proxy](#running-behind-a-reverse-proxy) |
 | `docker: command not found` | Docker isn't installed, or Docker Desktop isn't open yet |
 | `permission denied: ./setup.sh` | Run `chmod +x setup.sh` first, then try again |
 | App shows a connection error | The first build is still running — wait 30 seconds, then refresh |

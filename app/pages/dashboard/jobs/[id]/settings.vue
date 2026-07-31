@@ -1,4 +1,4 @@
-<script setup lang="ts">
+conca<script setup lang="ts">
 import {
   Save, Trash2, ArrowLeft, ExternalLink, Link2, ClipboardCopy, Globe2,
 } from 'lucide-vue-next'

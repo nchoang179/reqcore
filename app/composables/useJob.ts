@@ -20,6 +20,13 @@ export function useJob(id: MaybeRefOrGetter<string>) {
   /** Update job fields (partial) and refresh both detail and list caches */
   async function updateJob(payload: Partial<{
     title: string
+    /**
+     * A deliberate rename of the public URL — the server moves the slug for any
+     * value it receives here, published or not, with nothing redirecting the old
+     * one. Send it only when the recruiter actually changed it, and send the
+     * editable base without the generated `-a1b2c3d4` suffix.
+     */
+    slug: string
     description: string | null
     /** Derived from the structured parts server-side — send those, not this. */
     location: string | null

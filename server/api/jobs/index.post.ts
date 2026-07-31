@@ -35,9 +35,8 @@ export default defineEventHandler(async (event) => {
 
   // Generate a deterministic ID upfront so we can build the slug
   const jobId = crypto.randomUUID()
-  const slug = generateJobSlug(body.title, jobId, body.slug)
 
-  const created = await db.transaction(async (tx) => {
+  const insertJob = (slug: string) => db.transaction(async (tx) => {
     const [createdJob] = await tx.insert(job).values({
       id: jobId,
       organizationId: orgId,
@@ -133,7 +132,16 @@ export default defineEventHandler(async (event) => {
     }
 
     return createdJob
-  }).catch(async (error) => {
+  })
+
+  const created = await insertJob(generateJobSlug(body.title, jobId, body.slug)).catch(async (error) => {
+    // `job.slug` is unique across every org and the suffix is only 32 bits of
+    // the id, so two orgs reposting the same title can draw the same one. A
+    // second attempt with a fresh suffix beats a bare 500 on job creation — the
+    // job id itself is untouched, only the slug's random half is redrawn.
+    if (isDuplicateJobSlugError(error)) {
+      return insertJob(generateJobSlug(body.title, crypto.randomUUID(), body.slug))
+    }
     // Lost a race with a concurrent create: the one-test-role-per-org index
     // refused this one. Re-running the check gives the loser the same 409 the
     // first caller's pre-check would have, rather than a 500.

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import type { H3Event, EventHandlerRequest } from 'h3'
 
 // ── Stub Nitro auto-imports BEFORE importing the module under test ───────────
@@ -11,12 +11,8 @@ interface FakeEvent {
   __resHeaders: Record<string, string>
 }
 
-const envStub = {
-  TRUSTED_PROXY_IP: undefined as string | undefined,
-}
-
-vi.stubGlobal('env', envStub)
 vi.stubGlobal('getRequestIP', (event: FakeEvent) => event.__ip)
+vi.stubGlobal('getRequestURL', () => new URL('http://localhost/api/public/jobs/x/apply'))
 vi.stubGlobal('getHeader', (event: FakeEvent, name: string) => event.__headers[name.toLowerCase()])
 vi.stubGlobal('setResponseHeaders', (event: FakeEvent, headers: Record<string, string | number>) => {
   for (const [k, v] of Object.entries(headers)) event.__resHeaders[k] = String(v)
@@ -31,14 +27,22 @@ vi.stubGlobal('createError', (opts: { statusCode: number, statusMessage?: string
   return err
 })
 
-const { createRateLimiter } = await import('../../server/utils/rateLimit')
+const { createRateLimiter, getClientIp } = await import('../../server/utils/rateLimit')
 
 function makeEvent(ip = '1.2.3.4', headers: Record<string, string> = {}): FakeEvent & H3Event<EventHandlerRequest> {
   return { __ip: ip, __headers: headers, __resHeaders: {} } as unknown as FakeEvent & H3Event<EventHandlerRequest>
 }
 
+const ORIGINAL_ENV = { ...process.env }
+
 beforeEach(() => {
-  envStub.TRUSTED_PROXY_IP = undefined
+  delete process.env.TRUSTED_PROXY
+  delete process.env.TRUSTED_PROXY_IP
+  process.env.NODE_ENV = ORIGINAL_ENV.NODE_ENV
+})
+
+afterEach(() => {
+  process.env.NODE_ENV = ORIGINAL_ENV.NODE_ENV
 })
 
 describe('createRateLimiter', () => {
@@ -147,7 +151,7 @@ describe('createRateLimiter', () => {
   })
 
   it('respects X-Forwarded-For only when TRUSTED_PROXY_IP matches the socket peer', async () => {
-    envStub.TRUSTED_PROXY_IP = '127.0.0.1'
+    process.env.TRUSTED_PROXY_IP = '127.0.0.1'
     const limiter = createRateLimiter({ windowMs: 60_000, maxRequests: 1 })
 
     // Request comes through the trusted proxy; XFF carries the real client IP.
@@ -161,5 +165,117 @@ describe('createRateLimiter', () => {
     // Re-using the trusted hop with the same forwarded IP should now hit the limit.
     const trustedAgain = makeEvent('127.0.0.1', { 'x-forwarded-for': '203.0.113.7' })
     await expect(limiter(trustedAgain)).rejects.toMatchObject({ statusCode: 429 })
+  })
+
+  it('does not count rejected requests when countMode is "successes"', async () => {
+    // The regression this guards: an applicant whose first attempts are rejected
+    // (wrong file type, missing answer, 413) gets locked out of the form before
+    // ever submitting anything.
+    const limiter = createRateLimiter({ windowMs: 60_000, maxRequests: 2, countMode: 'successes' })
+    const ip = '9.9.9.9'
+
+    // Ten failed attempts — the handler never calls record().
+    for (let i = 0; i < 10; i++) {
+      await expect(limiter(makeEvent(ip))).resolves.toBeUndefined()
+    }
+
+    // The full budget is still there.
+    const first = makeEvent(ip)
+    await limiter(first)
+    expect(first.__resHeaders['X-RateLimit-Remaining']).toBe('2')
+    limiter.record(first)
+
+    const second = makeEvent(ip)
+    await limiter(second)
+    limiter.record(second)
+
+    await expect(limiter(makeEvent(ip))).rejects.toMatchObject({ statusCode: 429 })
+  })
+
+  it('ignores record() in the default attempts mode so requests are never double-counted', async () => {
+    const limiter = createRateLimiter({ windowMs: 60_000, maxRequests: 2 })
+    const event = makeEvent('8.8.8.8')
+
+    await limiter(event)
+    limiter.record(event)
+
+    // Only one slot consumed by the pair above, so a second request is admitted.
+    await expect(limiter(makeEvent('8.8.8.8'))).resolves.toBeUndefined()
+    await expect(limiter(makeEvent('8.8.8.8'))).rejects.toMatchObject({ statusCode: 429 })
+  })
+
+  it('does not share one bucket across clients behind a proxy in production', async () => {
+    // The regression this guards: with header trust misconfigured, every request
+    // keys on the platform edge socket address, so the Nth applicant across all
+    // orgs gets a 429 for somebody else's traffic.
+    process.env.NODE_ENV = 'production'
+    const limiter = createRateLimiter({ windowMs: 15 * 60_000, maxRequests: 5 })
+
+    const edgeIp = '100.64.0.3'
+    for (let i = 0; i < 5; i++) {
+      await limiter(makeEvent(edgeIp, { 'cf-connecting-ip': `203.0.113.${i}` }))
+    }
+
+    // Sixth applicant, same proxy hop, different client — must still be admitted.
+    await expect(
+      limiter(makeEvent(edgeIp, { 'cf-connecting-ip': '203.0.113.99' })),
+    ).resolves.toBeUndefined()
+
+    // ...while a client that really did send 5 requests is blocked.
+    const repeat = () => limiter(makeEvent(edgeIp, { 'cf-connecting-ip': '198.51.100.4' }))
+    for (let i = 0; i < 5; i++) await repeat()
+    await expect(repeat()).rejects.toMatchObject({ statusCode: 429 })
+  })
+})
+
+describe('getClientIp', () => {
+  it('defaults to CF-Connecting-IP in production', () => {
+    process.env.NODE_ENV = 'production'
+    expect(getClientIp(makeEvent('100.64.0.3', {
+      'cf-connecting-ip': '203.0.113.7',
+      'x-forwarded-for': '203.0.113.7, 172.16.0.1',
+    }))).toBe('203.0.113.7')
+  })
+
+  it('falls back to the leftmost X-Forwarded-For entry in cloudflare mode', () => {
+    process.env.TRUSTED_PROXY = 'cloudflare'
+    expect(getClientIp(makeEvent('100.64.0.3', {
+      'x-forwarded-for': '203.0.113.7, 172.16.0.1',
+    }))).toBe('203.0.113.7')
+  })
+
+  it('ignores forwarding headers when TRUSTED_PROXY=none', () => {
+    process.env.TRUSTED_PROXY = 'none'
+    expect(getClientIp(makeEvent('100.64.0.3', {
+      'cf-connecting-ip': '203.0.113.7',
+      'x-forwarded-for': '203.0.113.7',
+    }))).toBe('100.64.0.3')
+  })
+
+  it('counts X-Forwarded-For entries from the right with a hop count', () => {
+    process.env.TRUSTED_PROXY = '2'
+    // Client prepended a fake entry; two hops are trusted, so the third-from-left
+    // (= second-from-right) entry is the real client.
+    expect(getClientIp(makeEvent('10.0.0.1', {
+      'x-forwarded-for': '1.1.1.1, 203.0.113.7, 172.16.0.1',
+    }))).toBe('203.0.113.7')
+  })
+
+  it('falls back to the socket address when the trusted header is missing or junk', () => {
+    process.env.TRUSTED_PROXY = 'cloudflare'
+    expect(getClientIp(makeEvent('100.64.0.3', { 'cf-connecting-ip': 'not-an-ip' }))).toBe('100.64.0.3')
+    expect(getClientIp(makeEvent('100.64.0.3'))).toBe('100.64.0.3')
+  })
+
+  it('normalizes ports and IPv4-mapped IPv6 so one client gets one bucket', () => {
+    process.env.TRUSTED_PROXY = 'cloudflare'
+    expect(getClientIp(makeEvent('10.0.0.1', { 'cf-connecting-ip': '203.0.113.7:54321' }))).toBe('203.0.113.7')
+    expect(getClientIp(makeEvent('10.0.0.1', { 'cf-connecting-ip': '::ffff:203.0.113.7' }))).toBe('203.0.113.7')
+    expect(getClientIp(makeEvent('10.0.0.1', { 'cf-connecting-ip': '[2001:db8::1]:443' }))).toBe('2001:db8::1')
+  })
+
+  it('ignores an invalid TRUSTED_PROXY value instead of trusting headers blindly', () => {
+    process.env.TRUSTED_PROXY = 'yes-please'
+    expect(getClientIp(makeEvent('100.64.0.3', { 'cf-connecting-ip': '203.0.113.7' }))).toBe('100.64.0.3')
   })
 })
