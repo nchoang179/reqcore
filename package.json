@@ -75,7 +75,7 @@
   },
   "devDependencies": {
     "@crowdin/cli": "^4.15.0",
-    "@playwright/test": "^1.62.0",
+    "@playwright/test": "^1.62.1",
     "@types/html-to-text": "^9.0.4",
     "@types/node": "^25.9.5",
     "@types/nodemailer": "^8.0.0",
