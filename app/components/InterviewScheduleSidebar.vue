@@ -22,15 +22,25 @@ const props = withDefaults(defineProps<{
   jobTitle: string
   interview?: Interview | null
   teleportTarget?: string | HTMLElement
+  /**
+   * Opened from the "Interview" status transition — offer moving the candidate
+   * into the interview stage without scheduling anything here (teams that book
+   * interviews outside reqcore).
+   */
+  allowSkip?: boolean
 }>(), {
   interview: null,
   teleportTarget: 'body',
+  allowSkip: false,
 })
 
 const emit = defineEmits<{
   close: []
   scheduled: [createdInterview?: { id: string, googleCalendarEventLink?: string | null }]
+  skip: []
 }>()
+
+const canSkip = computed(() => props.allowSkip && !props.interview)
 
 type SavedInterview = {
   id: string
@@ -384,6 +394,15 @@ function finish() {
 
             <footer class="shrink-0 border-t border-surface-200 px-5 py-4 dark:border-surface-800">
               <p v-if="formattedSchedule" class="mb-3 truncate text-xs text-surface-500 dark:text-surface-400">{{ formattedSchedule }} · {{ form.duration }} min</p>
+              <button
+                v-if="canSkip"
+                type="button"
+                class="mb-3 w-full cursor-pointer rounded-lg px-4 py-2 text-sm font-medium text-surface-500 hover:bg-surface-50 hover:text-surface-700 disabled:cursor-not-allowed disabled:opacity-50 dark:text-surface-400 dark:hover:bg-surface-800 dark:hover:text-surface-200"
+                :disabled="isSubmitting"
+                @click="emit('skip')"
+              >
+                Skip — move to Interview without scheduling
+              </button>
               <div class="flex gap-3">
                 <button type="button" class="h-10 flex-1 rounded-lg border border-surface-300 px-4 text-sm font-medium text-surface-700 hover:bg-surface-50 dark:border-surface-700 dark:text-surface-300 dark:hover:bg-surface-800" :disabled="isSubmitting" @click="emit('close')">Cancel</button>
                 <button type="submit" class="inline-flex h-10 flex-[1.5] items-center justify-center gap-2 rounded-lg bg-brand-600 px-4 text-sm font-semibold text-white hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50" :disabled="isSubmitting">
