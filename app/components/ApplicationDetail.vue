@@ -275,10 +275,23 @@ function toggleInterviewExpand(id: string) {
 
 const showInterviewSidebar = ref(false)
 const interviewToReschedule = ref<Interview | null>(null)
+const interviewSidebarAllowsSkip = ref(false)
 
 function openInterviewScheduler() {
   interviewToReschedule.value = null
+  interviewSidebarAllowsSkip.value = false
   showInterviewSidebar.value = true
+}
+
+/** "Interview" status transition — scheduling is offered, but skippable. */
+function openInterviewSchedulerForStatus() {
+  openInterviewScheduler()
+  interviewSidebarAllowsSkip.value = true
+}
+
+async function skipInterviewScheduling() {
+  closeInterviewSidebar()
+  await changeStatus('interview')
 }
 
 function openReschedule(iv: Interview) {
@@ -289,6 +302,7 @@ function openReschedule(iv: Interview) {
 function closeInterviewSidebar() {
   showInterviewSidebar.value = false
   interviewToReschedule.value = null
+  interviewSidebarAllowsSkip.value = false
 }
 
 async function handleInterviewScheduled() {
@@ -708,7 +722,7 @@ function scoreClass(score: number) {
             :disabled="isMutating"
             class="cursor-pointer rounded-lg px-3 py-1.5 text-xs font-semibold transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-50 shadow-sm inline-flex items-center gap-1.5"
             :class="transitionClasses[nextStatus] ?? 'border border-surface-300 dark:border-surface-700 text-surface-600 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-800'"
-            @click="nextStatus === 'interview' ? openInterviewScheduler() : changeStatus(nextStatus)"
+            @click="nextStatus === 'interview' ? openInterviewSchedulerForStatus() : changeStatus(nextStatus)"
           >
             {{ transitionLabels[nextStatus] ?? nextStatus }}
             <kbd class="inline-flex items-center justify-center rounded px-1 py-0.5 text-[10px] font-mono leading-none opacity-60 bg-black/10 dark:bg-white/10 min-w-[16px]">{{ idx + 1 }}</kbd>
@@ -1422,8 +1436,10 @@ function scoreClass(score: number) {
       :candidate-name="formatCandidateName(application.candidate)"
       :job-title="application.job.title"
       :interview="interviewToReschedule"
+      :allow-skip="interviewSidebarAllowsSkip"
       @close="closeInterviewSidebar"
       @scheduled="handleInterviewScheduled"
+      @skip="skipInterviewScheduling"
     />
 
     <!-- Document Preview Modal -->

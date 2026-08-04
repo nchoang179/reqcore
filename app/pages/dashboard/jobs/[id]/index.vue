@@ -831,10 +831,12 @@ const isMutating = ref(false)
 const showInterviewSidebar = ref(false)
 const interviewTargetApplication = ref<{ id: string; name: string } | null>(null)
 const interviewToReschedule = ref<Interview | null>(null)
+const interviewSidebarAllowsSkip = ref(false)
 
 function openInterviewScheduler() {
   if (!currentSummary.value) return
   interviewToReschedule.value = null
+  interviewSidebarAllowsSkip.value = false
   interviewTargetApplication.value = {
     id: currentSummary.value.id,
     name: `${currentSummary.value.candidateFirstName} ${currentSummary.value.candidateLastName}`,
@@ -842,10 +844,22 @@ function openInterviewScheduler() {
   showInterviewSidebar.value = true
 }
 
+/** "Interview" status transition — scheduling is offered, but skippable. */
+function openInterviewSchedulerForStatus() {
+  openInterviewScheduler()
+  interviewSidebarAllowsSkip.value = showInterviewSidebar.value
+}
+
+async function skipInterviewScheduling() {
+  closeInterviewSidebar()
+  await changeStatus('interview')
+}
+
 function closeInterviewSidebar() {
   showInterviewSidebar.value = false
   interviewTargetApplication.value = null
   interviewToReschedule.value = null
+  interviewSidebarAllowsSkip.value = false
 }
 
 async function handleInterviewScheduled() {
@@ -1345,7 +1359,7 @@ function handleKeyNavigation(event: KeyboardEvent) {
     event.preventDefault()
     const targetStatus = allowedTransitions.value[num - 1]!
     if (targetStatus === 'interview') {
-      openInterviewScheduler()
+      openInterviewSchedulerForStatus()
     } else {
       changeStatus(targetStatus)
     }
@@ -1810,7 +1824,7 @@ function closeDocPreview() {
                   :disabled="isMutating"
                   class="cursor-pointer rounded-lg px-3 py-1.5 text-xs font-semibold transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm inline-flex items-center gap-1.5"
                   :class="transitionClasses[nextStatus] ?? 'border border-surface-300 text-surface-600 hover:bg-surface-50'"
-                  @click="nextStatus === 'interview' ? openInterviewScheduler() : changeStatus(nextStatus)"
+                  @click="nextStatus === 'interview' ? openInterviewSchedulerForStatus() : changeStatus(nextStatus)"
                 >
                   {{ transitionLabels[nextStatus] ?? nextStatus }}
                   <kbd class="inline-flex items-center justify-center rounded px-1 py-0.5 text-[10px] font-mono leading-none opacity-60 bg-black/10 dark:bg-white/10 min-w-[16px]">{{ idx + 1 }}</kbd>
@@ -2942,8 +2956,10 @@ function closeDocPreview() {
       :job-title="jobData?.title ?? ''"
       :interview="interviewToReschedule"
       :teleport-target="teleportTarget"
+      :allow-skip="interviewSidebarAllowsSkip"
       @close="closeInterviewSidebar"
       @scheduled="handleInterviewScheduled"
+      @skip="skipInterviewScheduling"
     />
 
     <InterviewStatusActionDialog
