@@ -1,6 +1,15 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
+import { copyFile, mkdir } from "node:fs/promises";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 import tailwindcss from "@tailwindcss/vite";
 import { readEnvFlagOverrides } from "./shared/feature-flags";
+
+// Resolved here so the build fails loudly at config load if pdfjs-dist ever
+// moves the file, rather than silently shipping a server that can't read PDFs.
+const pdfjsWorkerPath = createRequire(import.meta.url).resolve(
+  "pdfjs-dist/legacy/build/pdf.worker.mjs",
+);
 
 const railwayEnvironmentName =
   process.env.RAILWAY_ENVIRONMENT_NAME?.toLowerCase() ?? "";
@@ -296,6 +305,27 @@ export default defineNuxtConfig({
   nitro: {
     experimental: {
       tasks: true,
+    },
+    hooks: {
+      // pdfjs-dist builds its worker import specifier at runtime, so Nitro's
+      // dependency tracer never sees pdf.worker.mjs and drops it from
+      // .output/server/node_modules. Every PDF parse then dies with
+      // "Setting up fake worker failed: Cannot find module .../pdf.worker.mjs",
+      // which reaches recruiters as unreadable CVs and 0% AI scores.
+      //
+      // externals.traceInclude can't fix this: Nitro feeds the entry back
+      // through Rollup's resolver, which returns the bare specifier, and then
+      // hands that to nodeFileTrace as a root-relative path. So place the file
+      // ourselves, next to the pdf.mjs that imports it.
+      async compiled(nitro) {
+        if (nitro.options.dev) return;
+        const destination = join(
+          nitro.options.output.serverDir,
+          "node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs",
+        );
+        await mkdir(dirname(destination), { recursive: true });
+        await copyFile(pdfjsWorkerPath, destination);
+      },
     },
     scheduledTasks: {
       // Every minute: drain the recruiter notification outbox (instant cadence).

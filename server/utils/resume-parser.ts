@@ -61,8 +61,74 @@ export interface ResumeSection {
 }
 
 /**
- * Parse a document buffer and extract text content.
+ * Why a parse produced no text.
+ *
+ * The distinction matters: `empty` is the document's fault (a scan, an
+ * image-only export) and the recruiter can act on it, while `failed` is ours
+ * and they can only be told to retry. Collapsing the two once let a missing
+ * pdfjs worker in the production bundle masquerade as "every CV is a scan".
+ */
+export type DocumentParseFailure = 'unsupported_type' | 'empty' | 'failed'
+
+export type DocumentParseResult =
+  | { ok: true, parsed: ParsedResume }
+  | { ok: false, reason: DocumentParseFailure }
+
+/**
+ * Parse a document buffer and extract text content, reporting *why* on failure.
  * Routes to the appropriate parser based on MIME type.
+ *
+ * @param buffer - Raw file bytes
+ * @param mimeType - Validated MIME type of the document
+ */
+export async function parseDocumentDetailed(
+  buffer: Buffer,
+  mimeType: string,
+): Promise<DocumentParseResult> {
+  let parsed: ParsedResume | null
+  try {
+    switch (mimeType) {
+      case 'application/pdf':
+        parsed = await parsePdf(buffer)
+        break
+      case 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
+        parsed = await parseDocx(buffer)
+        break
+      case 'application/msword':
+        parsed = await parseDoc(buffer)
+        break
+      default:
+        logWarn('resume_parser.unsupported_mime_type', {
+          mime_type: mimeType,
+        })
+        return { ok: false, reason: 'unsupported_type' }
+    }
+  }
+  catch (error) {
+    logError('resume_parser.parse_failed', {
+      mime_type: mimeType,
+      error_message: error instanceof Error ? error.message : String(error),
+    })
+    return { ok: false, reason: 'failed' }
+  }
+
+  if (!parsed) {
+    // Readable file, nothing to read — the scanned/image-only case. Logged so
+    // it stays separable from `resume_parser.parse_failed` in PostHog.
+    logWarn('resume_parser.no_text_extracted', {
+      mime_type: mimeType,
+      byte_size: buffer.length,
+    })
+    return { ok: false, reason: 'empty' }
+  }
+
+  return { ok: true, parsed }
+}
+
+/**
+ * Parse a document buffer and extract text content.
+ * Returns null when no text could be extracted, for whatever reason — use
+ * {@link parseDocumentDetailed} when the caller needs to tell the reasons apart.
  *
  * @param buffer - Raw file bytes
  * @param mimeType - Validated MIME type of the document
@@ -72,28 +138,8 @@ export async function parseDocument(
   buffer: Buffer,
   mimeType: string,
 ): Promise<ParsedResume | null> {
-  try {
-    switch (mimeType) {
-      case 'application/pdf':
-        return await parsePdf(buffer)
-      case 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
-        return await parseDocx(buffer)
-      case 'application/msword':
-        return await parseDoc(buffer)
-      default:
-        logWarn('resume_parser.unsupported_mime_type', {
-          mime_type: mimeType,
-        })
-        return null
-    }
-  }
-  catch (error) {
-    logError('resume_parser.parse_failed', {
-      mime_type: mimeType,
-      error_message: error instanceof Error ? error.message : String(error),
-    })
-    return null
-  }
+  const result = await parseDocumentDetailed(buffer, mimeType)
+  return result.ok ? result.parsed : null
 }
 
 // ─── PDF Parser ───────────────────────────────────────────────────
@@ -106,7 +152,11 @@ async function parsePdf(buffer: Buffer): Promise<ParsedResume | null> {
   const { PDFParse } = await import('pdf-parse')
 
   const parser = new PDFParse({ data: buffer })
-  const result = await parser.getText()
+  // pageJoiner defaults to "\n-- page_number of total_number --". Those markers
+  // are not resume content: on an image-only CV they are the *only* text, so the
+  // document reads as non-empty, gets stored, and reaches the model as the
+  // candidate's entire resume — which scores 0% with nothing logged anywhere.
+  const result = await parser.getText({ pageJoiner: '' })
 
   const text = normalizeText(result.text)
   if (!text) {

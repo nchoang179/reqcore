@@ -1,6 +1,6 @@
 import { fileTypeFromBuffer } from 'file-type'
 import { ALLOWED_MIME_TYPES, MAX_FILE_SIZE } from '../../utils/schemas/document'
-import { parseDocument } from '../../utils/resume-parser'
+import { parseDocumentDetailed } from '../../utils/resume-parser'
 import { resolveAnalysisProvider } from '../../utils/ai/resolveProvider'
 import { assertPlatformBudget, BudgetExceededError, budgetErrorToHttp } from '../../utils/ai/budget'
 import { computeCostUsdMicros } from '../../utils/ai/pricing'
@@ -78,8 +78,18 @@ export default defineEventHandler(async (event) => {
   // 2. Extract text
   // ─────────────────────────────────────────────
 
-  const parsed = await parseDocument(fileBuffer, mimeType)
-  const text = parsed?.text?.trim() ?? ''
+  const parseResult = await parseDocumentDetailed(fileBuffer, mimeType)
+
+  // A parser crash is our problem, not the recruiter's — say so, and use a 5xx
+  // so it doesn't get filed away as "another scanned CV".
+  if (!parseResult.ok && parseResult.reason === 'failed') {
+    throw createError({
+      statusCode: 503,
+      statusMessage: 'Could not read this CV right now. Please try again, or fill the form in manually.',
+    })
+  }
+
+  const text = parseResult.ok ? parseResult.parsed.text.trim() : ''
 
   if (text.length < MIN_TEXT_LENGTH) {
     throw createError({

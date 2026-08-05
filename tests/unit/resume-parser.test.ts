@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseDocument, extractResumeText, type ParsedResume } from '../../server/utils/resume-parser'
+import { parseDocument, parseDocumentDetailed, extractResumeText, type ParsedResume } from '../../server/utils/resume-parser'
 
 /**
  * Create a minimal valid PDF containing the given text.
@@ -81,6 +81,14 @@ describe('resume-parser', () => {
       expect(result!.metadata.pageCount).toBe(1)
     })
 
+    it('does not inject page markers into the extracted text', async () => {
+      // pdf-parse stamps "-- 1 of 2 --" between pages by default. That text is
+      // not the candidate's, and on a scanned CV it is all the model would see.
+      const result = await parseDocument(createTestPdf('John Doe Software Engineer'), 'application/pdf')
+
+      expect(result!.text).not.toMatch(/--\s*\d+\s*of\s*\d+\s*--/)
+    })
+
     it('handles DOCX mime type gracefully with invalid data', async () => {
       const buffer = Buffer.from('not a real docx')
       const result = await parseDocument(buffer, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
@@ -91,6 +99,32 @@ describe('resume-parser', () => {
       const buffer = Buffer.from('not a real doc')
       const result = await parseDocument(buffer, 'application/msword')
       expect(result).toBeNull()
+    })
+  })
+
+  describe('parseDocumentDetailed', () => {
+    it('reports the reason as unsupported_type for an unknown MIME type', async () => {
+      const result = await parseDocumentDetailed(Buffer.from('test content'), 'text/plain')
+      expect(result).toEqual({ ok: false, reason: 'unsupported_type' })
+    })
+
+    it('separates a parser failure from a document with no text', async () => {
+      // A corrupt file makes the parser throw; that is our problem, not the
+      // recruiter's, and must not be reported as "this CV is a scan".
+      const result = await parseDocumentDetailed(Buffer.from('not a real pdf file content'), 'application/pdf')
+      expect(result).toEqual({ ok: false, reason: 'failed' })
+    })
+
+    it('reports the reason as empty for a readable file with no text', async () => {
+      const result = await parseDocumentDetailed(createTestPdf(''), 'application/pdf')
+      expect(result).toEqual({ ok: false, reason: 'empty' })
+    })
+
+    it('returns the parsed document on success', async () => {
+      const result = await parseDocumentDetailed(createTestPdf('John Doe Software Engineer'), 'application/pdf')
+
+      expect(result.ok).toBe(true)
+      expect(result.ok && result.parsed.text).toContain('John Doe')
     })
   })
 
