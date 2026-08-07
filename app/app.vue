@@ -3,6 +3,15 @@ const i18nHead = useLocaleHead({
   seo: true,
 })
 
+// @nuxtjs/i18n exposes these as Record<string, string> even though it only
+// emits alternate and canonical links. Keep that runtime shape explicit for
+// Unhead 3's stricter discriminated link types.
+type LocaleHeadLink =
+  | { rel: 'alternate', href: string, hreflang: string }
+  | { rel: 'canonical', href: string }
+type LocaleHeadMeta = { property: string, content: string }
+type LocaleHtmlAttrs = { dir?: 'auto' | 'ltr' | 'rtl', lang?: string }
+
 // Job listings/detail and branded career pages serve recruiter-authored,
 // single-language content under every locale prefix, so their localized
 // variants are noindex (see nuxt.config routeRules + the pages' robots meta).
@@ -20,9 +29,9 @@ const i18nLinks = computed(() =>
     : i18nHead.value.link)
 
 useHead(() => ({
-  htmlAttrs: i18nHead.value.htmlAttrs,
-  link: i18nLinks.value,
-  meta: i18nHead.value.meta,
+  htmlAttrs: i18nHead.value.htmlAttrs as LocaleHtmlAttrs,
+  link: i18nLinks.value as LocaleHeadLink[],
+  meta: i18nHead.value.meta as LocaleHeadMeta[],
 }))
 
 // Blocking inline script to apply dark mode before first paint (prevents white
