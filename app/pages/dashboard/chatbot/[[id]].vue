@@ -17,7 +17,37 @@ useSeoMeta({
   robots: 'noindex, nofollow',
 })
 
-const enabled = useFeatureFlagEnabled('chatbot-experience')
+// Two independent gates, matching the server (utils/chatbotAccess.ts):
+// the flag says whether the assistant has shipped, the plan entitlement says
+// whether this org may use it. Unshipped renders nothing; unentitled renders
+// the upgrade card.
+const shipped = useFeatureFlagEnabled('chatbot-experience')
+const { hasFeature } = usePlanFeature()
+const entitled = computed(() => hasFeature('chatbot'))
+const enabled = computed(() => shipped.value && entitled.value)
+
+// The server owns the allowance; this shared billing meter lets the composer
+// warn before the last free turns and become an upgrade path once they are
+// spent. Members can still read every existing conversation after the cap.
+const {
+  limit: chatbotLimit,
+  remaining: chatbotMessagesLeft,
+  exhausted: chatbotQuotaExhausted,
+  nearLimit: chatbotQuotaNearLimit,
+  refresh: refreshChatbotQuota,
+} = useChatbotQuota()
+const {
+  allowed: canManageBilling,
+  isLoading: billingPermissionLoading,
+} = usePermission({ organization: ['update'] })
+const localePath = useLocalePath()
+const soloUpgradeTarget = computed(() => canManageBilling.value
+  ? {
+      path: localePath('/dashboard/settings/billing'),
+      query: buildBillingCheckoutQuery({ planId: 'solo', cadence: 'monthly' }),
+    }
+  : localePath('/dashboard/settings/billing'),
+)
 
 const {
   messages,
@@ -125,12 +155,19 @@ function autoResize() {
 watch(draft, () => nextTick(autoResize))
 
 async function handleSubmit() {
-  if (isStreaming.value) return
+  if (isStreaming.value || chatbotQuotaExhausted.value) return
   const content = draft.value
   draft.value = ''
   await nextTick(autoResize)
-  await send(content)
-  await nextTick(scrollToBottom)
+  try {
+    await send(content)
+  }
+  finally {
+    // The usage ledger is persisted before the response stream closes, so this
+    // sees the just-completed turn and swaps the composer at exactly the cap.
+    await refreshChatbotQuota()
+    await nextTick(scrollToBottom)
+  }
 }
 
 function onKeyDown(e: KeyboardEvent) {
@@ -220,8 +257,8 @@ async function startNew() {
 </script>
 
 <template>
-  <!-- Feature-flag-gated: hide entirely when off. -->
-  <div v-if="!enabled" class="mx-auto max-w-2xl py-24 text-center">
+  <!-- Not shipped for this account yet: say nothing about plans. -->
+  <div v-if="!shipped" class="mx-auto max-w-2xl py-24 text-center">
     <Sparkles class="mx-auto size-10 text-surface-400" />
     <h1 class="mt-4 text-2xl font-semibold text-surface-900 dark:text-surface-100">
       Reqcore Assistant
@@ -229,6 +266,15 @@ async function startNew() {
     <p class="mt-2 text-sm text-surface-500">
       This feature isn't available on your account yet.
     </p>
+  </div>
+
+  <!-- Shipped, but the org's plan doesn't include it: sell the upgrade. -->
+  <div v-else-if="!entitled" class="mx-auto max-w-2xl px-4 py-16">
+    <FeatureLockCard
+      feature="chatbot"
+      title="Unlock the Reqcore Assistant"
+      description="Ask questions about your pipeline in plain language — compare candidates, summarise a role's applicants, and dig into any CV. Runs on Reqcore AI out of the box, or on your own API key."
+    />
   </div>
 
   <div v-else class="flex h-full overflow-hidden bg-white dark:bg-surface-950">
@@ -362,13 +408,16 @@ async function startNew() {
         <!-- Empty state -->
         <div v-if="messages.length === 0" class="mx-auto flex h-full max-w-3xl flex-col items-center justify-center px-6 py-12 text-center">
           <h2 class="mt-5 text-xl font-semibold text-surface-900 dark:text-surface-100">
-            What do you want to figure out?
+            {{ chatbotQuotaExhausted ? 'Your conversations are still here' : 'What do you want to figure out?' }}
           </h2>
-          <p class="mt-2 max-w-md text-sm text-surface-500">
+          <p v-if="chatbotQuotaExhausted" class="mt-2 max-w-md text-sm text-surface-500">
+            Open any previous chat from the sidebar whenever you need it. Upgrade to Solo below when you're ready to ask the assistant something new.
+          </p>
+          <p v-else class="mt-2 max-w-md text-sm text-surface-500">
             Ask anything about your jobs, candidates, applications, or uploaded resumes.
             Reqcore Assistant has live access to your hiring data.
           </p>
-          <div class="mt-8 grid w-full max-w-2xl grid-cols-1 gap-2 sm:grid-cols-2">
+          <div v-if="!chatbotQuotaExhausted" class="mt-8 grid w-full max-w-2xl grid-cols-1 gap-2 sm:grid-cols-2">
             <button
               v-for="s in suggestions"
               :key="s"
@@ -518,99 +567,128 @@ async function startNew() {
         </div>
       </div>
 
-      <!-- Composer -->
+      <!-- Composer / free-plan quota upsell -->
       <div class="border-t border-surface-200 dark:border-surface-800 px-4 py-3 sm:px-6">
         <div class="mx-auto w-full max-w-3xl">
-          <div
-            class="rounded-2xl border border-surface-200/80 dark:border-surface-800/80 bg-white dark:bg-surface-900 shadow-sm focus-within:border-brand-400 dark:focus-within:border-brand-600 focus-within:ring-2 focus-within:ring-brand-500/10 transition-all"
-          >
+          <ChatbotQuotaUpsellCard
+            v-if="chatbotQuotaExhausted"
+            :limit="chatbotLimit ?? 0"
+            :can-manage="canManageBilling"
+            :permission-loading="billingPermissionLoading"
+          />
+
+          <template v-else>
             <div
-              v-if="pendingAttachments.length > 0"
-              class="flex flex-wrap gap-1.5 border-b border-surface-100 dark:border-surface-800 px-3 py-2"
+              v-if="chatbotQuotaNearLimit"
+              role="status"
+              class="mb-2 flex flex-col gap-2 rounded-xl border border-amber-200 bg-amber-50/80 px-3.5 py-2.5 text-xs text-amber-900 sm:flex-row sm:items-center sm:justify-between dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-200"
+            >
+              <p class="flex items-center gap-2">
+                <AlertCircle class="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                <span>
+                  <strong>{{ chatbotMessagesLeft }} free {{ chatbotMessagesLeft === 1 ? 'message' : 'messages' }} left.</strong>
+                  Upgrade to keep chatting without losing your flow.
+                </span>
+              </p>
+              <NuxtLink
+                :to="soloUpgradeTarget"
+                class="shrink-0 font-semibold text-amber-800 underline decoration-amber-400/70 underline-offset-2 hover:text-amber-950 dark:text-amber-200 dark:hover:text-white"
+              >
+                Upgrade to Solo
+              </NuxtLink>
+            </div>
+
+            <div
+              class="rounded-2xl border border-surface-200/80 dark:border-surface-800/80 bg-white dark:bg-surface-900 shadow-sm focus-within:border-brand-400 dark:focus-within:border-brand-600 focus-within:ring-2 focus-within:ring-brand-500/10 transition-all"
             >
               <div
-                v-for="a in pendingAttachments"
-                :key="a.id"
-                class="group inline-flex items-center gap-1.5 rounded-lg border border-surface-200 dark:border-surface-700 bg-surface-50 dark:bg-surface-800 px-2 py-1 text-xs"
+                v-if="pendingAttachments.length > 0"
+                class="flex flex-wrap gap-1.5 border-b border-surface-100 dark:border-surface-800 px-3 py-2"
               >
-                <FileText class="size-3.5 text-brand-500" />
-                <span class="max-w-[160px] truncate font-medium">{{ a.filename }}</span>
-                <span class="text-surface-400">{{ formatBytes(a.sizeBytes) }}</span>
-                <button
-                  class="ml-1 inline-flex items-center justify-center rounded p-0.5 text-surface-400 hover:bg-surface-200 dark:hover:bg-surface-700 hover:text-danger-500 transition-colors cursor-pointer border-0 bg-transparent"
-                  :aria-label="`Remove ${a.filename}`"
-                  @click="removeAttachment(a.id)"
+                <div
+                  v-for="a in pendingAttachments"
+                  :key="a.id"
+                  class="group inline-flex items-center gap-1.5 rounded-lg border border-surface-200 dark:border-surface-700 bg-surface-50 dark:bg-surface-800 px-2 py-1 text-xs"
                 >
-                  <X class="size-3" />
-                </button>
+                  <FileText class="size-3.5 text-brand-500" />
+                  <span class="max-w-[160px] truncate font-medium">{{ a.filename }}</span>
+                  <span class="text-surface-400">{{ formatBytes(a.sizeBytes) }}</span>
+                  <button
+                    class="ml-1 inline-flex items-center justify-center rounded p-0.5 text-surface-400 hover:bg-surface-200 dark:hover:bg-surface-700 hover:text-danger-500 transition-colors cursor-pointer border-0 bg-transparent"
+                    :aria-label="`Remove ${a.filename}`"
+                    @click="removeAttachment(a.id)"
+                  >
+                    <X class="size-3" />
+                  </button>
+                </div>
+              </div>
+
+              <textarea
+                ref="composer"
+                v-model="draft"
+                rows="1"
+                placeholder="Ask Reqcore Assistant anything…"
+                class="block w-full resize-none border-0 bg-transparent px-4 pt-3 text-sm text-surface-900 dark:text-surface-100 placeholder:text-surface-400 focus:outline-none focus:ring-0"
+                @keydown="onKeyDown"
+              />
+
+              <div class="flex items-center justify-between gap-2 px-3 pb-2 pt-1">
+                <div class="flex items-center gap-1.5">
+                  <input
+                    ref="fileInput"
+                    type="file"
+                    accept=".pdf,.doc,.docx,.txt,.md,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
+                    multiple
+                    class="hidden"
+                    @change="handleFileChange"
+                  />
+                  <button
+                    class="inline-flex items-center justify-center size-8 rounded-lg text-surface-500 hover:text-brand-600 dark:hover:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950/40 transition-colors cursor-pointer border-0 bg-transparent disabled:opacity-50"
+                    title="Attach file"
+                    :disabled="uploading"
+                    @click="fileInputRef?.click()"
+                  >
+                    <Loader2 v-if="uploading" class="size-4 animate-spin" />
+                    <Paperclip v-else class="size-4" />
+                  </button>
+
+                  <ChatbotAgentPicker @manage="agentsOpen = true" />
+                  <ChatbotModelPicker @manage="navigateTo('/dashboard/settings/ai')" />
+                </div>
+
+                <div class="flex items-center gap-2">
+                  <button
+                    v-if="isStreaming"
+                    class="inline-flex items-center gap-1.5 rounded-lg bg-surface-900 dark:bg-surface-100 px-3 py-1.5 text-xs font-semibold text-white dark:text-surface-900 hover:opacity-90 transition-opacity cursor-pointer border-0"
+                    @click="abort"
+                  >
+                    <Square class="size-3.5 fill-current" />
+                    Stop
+                  </button>
+                  <button
+                    v-else
+                    class="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm shadow-brand-600/30 hover:bg-brand-700 transition-colors cursor-pointer border-0 disabled:cursor-not-allowed disabled:opacity-40"
+                    :disabled="!draft.trim() && pendingAttachments.length === 0"
+                    @click="handleSubmit"
+                  >
+                    <Send class="size-3.5" />
+                    Send
+                  </button>
+                </div>
               </div>
             </div>
 
-            <textarea
-              ref="composer"
-              v-model="draft"
-              rows="1"
-              placeholder="Ask Reqcore Assistant anything…"
-              class="block w-full resize-none border-0 bg-transparent px-4 pt-3 text-sm text-surface-900 dark:text-surface-100 placeholder:text-surface-400 focus:outline-none focus:ring-0"
-              @keydown="onKeyDown"
-            />
-
-            <div class="flex items-center justify-between gap-2 px-3 pb-2 pt-1">
-              <div class="flex items-center gap-1.5">
-                <input
-                  ref="fileInput"
-                  type="file"
-                  accept=".pdf,.doc,.docx,.txt,.md,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
-                  multiple
-                  class="hidden"
-                  @change="handleFileChange"
-                />
-                <button
-                  class="inline-flex items-center justify-center size-8 rounded-lg text-surface-500 hover:text-brand-600 dark:hover:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950/40 transition-colors cursor-pointer border-0 bg-transparent disabled:opacity-50"
-                  title="Attach file"
-                  :disabled="uploading"
-                  @click="fileInputRef?.click()"
-                >
-                  <Loader2 v-if="uploading" class="size-4 animate-spin" />
-                  <Paperclip v-else class="size-4" />
-                </button>
-
-                <ChatbotAgentPicker @manage="agentsOpen = true" />
-                <ChatbotModelPicker @manage="navigateTo('/dashboard/settings/ai')" />
-              </div>
-
-              <div class="flex items-center gap-2">
-                <button
-                  v-if="isStreaming"
-                  class="inline-flex items-center gap-1.5 rounded-lg bg-surface-900 dark:bg-surface-100 px-3 py-1.5 text-xs font-semibold text-white dark:text-surface-900 hover:opacity-90 transition-opacity cursor-pointer border-0"
-                  @click="abort"
-                >
-                  <Square class="size-3.5 fill-current" />
-                  Stop
-                </button>
-                <button
-                  v-else
-                  class="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm shadow-brand-600/30 hover:bg-brand-700 transition-colors cursor-pointer border-0 disabled:cursor-not-allowed disabled:opacity-40"
-                  :disabled="!draft.trim() && pendingAttachments.length === 0"
-                  @click="handleSubmit"
-                >
-                  <Send class="size-3.5" />
-                  Send
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <p
-            v-if="error"
-            class="mt-2 flex items-center gap-1.5 text-xs text-danger-600"
-          >
-            <AlertCircle class="size-3.5" />
-            {{ error }}
-          </p>
-          <p v-else class="mt-2 text-center text-[11px] text-surface-400">
-            Reqcore Assistant can make mistakes. Verify candidate-impacting decisions.
-          </p>
+            <p
+              v-if="error"
+              class="mt-2 flex items-center gap-1.5 text-xs text-danger-600"
+            >
+              <AlertCircle class="size-3.5" />
+              {{ error }}
+            </p>
+            <p v-else class="mt-2 text-center text-[11px] text-surface-400">
+              Reqcore Assistant can make mistakes. Verify candidate-impacting decisions.
+            </p>
+          </template>
         </div>
       </div>
     </main>

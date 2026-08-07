@@ -1,5 +1,9 @@
 /**
- * Resolve which AI provider + key an analysis run should use, and who pays.
+ * Resolve which AI provider + key an AI call should use, and who pays.
+ *
+ * Two entry points — `resolveAnalysisProvider` for scoring runs and
+ * `resolveChatbotProvider` for assistant turns. They share the same rules and
+ * return the same shape; they differ only in which "default" column they honour.
  *
  *   1. The org has its own AI config  → BYOK. Their key, their bill. Not capped.
  *   2. No org config, platform key set → route through OpenRouter on our key.
@@ -15,6 +19,7 @@ import { resolveOrgPlanId } from '../billing/plan'
 import { loadAiConfig } from './loadConfig'
 import { OPENROUTER_BASE_URL, type ProviderConfig } from './provider'
 import {
+  canUsePlatformAi,
   getPlatformAiOverride,
   PLATFORM_AI_CONFIG_ID,
   platformOverrideEnabled,
@@ -101,5 +106,71 @@ export async function resolveAnalysisProvider(
       provider: 'openrouter',
       model,
     }
+  }
+}
+
+/**
+ * Resolve the provider for one assistant turn.
+ *
+ * Resolution order:
+ *   1. `preferId === '__platform__'`  → the platform engine, explicitly picked.
+ *   2. `preferId` (a real config id)  → that BYOK config.
+ *   3. No preference, and the platform engine holds the chatbot-default slot
+ *      → platform.
+ *   4. Otherwise the org's BYOK chatbot default (or any config it has).
+ *   5. No BYOK config at all → fall back to the platform engine, so a Solo org
+ *      that never opened Settings → AI still gets a working assistant.
+ *   6. Nothing available → the 422 from loadAiConfig, pointing at Settings → AI.
+ *
+ * Grandfathered orgs are excluded from every platform path by `canUsePlatformAi`
+ * (their free tier is explicitly BYOK-only, since they pay their LLM provider
+ * directly) — so for them steps 3 and 5 are unavailable and a missing BYOK
+ * config surfaces as the 422 rather than silently spending the platform key.
+ */
+export async function resolveChatbotProvider(
+  orgId: string,
+  opts: { preferId?: string | null } = {},
+): Promise<ResolvedProvider> {
+  if (opts.preferId === PLATFORM_AI_CONFIG_ID) {
+    const platform = await resolvePlatformAiProviderConfig(orgId)
+    return { ...platform, billingMode: 'platform' }
+  }
+
+  if (!opts.preferId) {
+    const platformOverride = await getPlatformAiOverride(orgId)
+    if (
+      platformOverride?.isEnabled
+      && platformOverride.isDefaultChatbot
+      && await canUsePlatformAi(orgId)
+    ) {
+      const platform = await resolvePlatformAiProviderConfig(orgId)
+      return { ...platform, billingMode: 'platform' }
+    }
+  }
+
+  try {
+    const config = await loadAiConfig(orgId, { purpose: 'chatbot', preferId: opts.preferId })
+    return {
+      providerConfig: {
+        provider: config.provider as ProviderConfig['provider'],
+        model: config.model,
+        apiKeyEncrypted: config.apiKeyEncrypted,
+        baseUrl: config.baseUrl,
+        maxTokens: config.maxTokens,
+      },
+      billingMode: 'byok',
+      provider: config.provider,
+      model: config.model,
+    }
+  }
+  catch (err) {
+    // No BYOK config. Fall back to the platform engine unless it's unavailable
+    // (grandfathered org, no server key, or the org switched it off).
+    if (!await canUsePlatformAi(orgId)) throw err
+    const platformOverride = await getPlatformAiOverride(orgId)
+    if (!platformOverrideEnabled(platformOverride)) throw err
+
+    const platform = await resolvePlatformAiProviderConfig(orgId)
+    return { ...platform, billingMode: 'platform' }
   }
 }

@@ -1,7 +1,8 @@
 import { and, desc, eq } from 'drizzle-orm'
 import { chatbotConversation } from '../../../database/schema'
 import { requireChatbotAccess } from '../../../utils/chatbotAccess'
-import type { ChatbotConversationSummary, ChatbotScope } from '../../../../shared/chatbot'
+import { toConversationSummary } from '../../../utils/chatbotConversation'
+import type { ChatbotConversationSummary } from '../../../../shared/chatbot'
 
 /**
  * GET /api/chatbot/conversations — list the caller's conversations,
@@ -25,19 +26,5 @@ export default defineEventHandler(async (event): Promise<{ conversations: Chatbo
     limit: 200,
   })
 
-  return {
-    conversations: rows.map((r) => ({
-      id: r.id,
-      title: r.title,
-      folderId: r.folderId,
-      agentId: r.agentId,
-      aiConfigId: r.aiConfigId,
-      scope: (r.scope ?? { kind: 'organization' }) as ChatbotScope,
-      pinned: r.pinned,
-      thinking: r.thinking,
-      lastMessagePreview: r.lastMessagePreview,
-      lastMessageAt: r.lastMessageAt ? r.lastMessageAt.getTime() : null,
-      createdAt: r.createdAt.getTime(),
-    })),
-  }
+  return { conversations: rows.map(toConversationSummary) }
 })

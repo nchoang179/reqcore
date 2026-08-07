@@ -5,14 +5,15 @@
  * Both meters mirror gates enforced elsewhere:
  *  - activeRoles  → assertActiveRoleLimit (server/utils/billing/plan.ts)
  *  - aiAnalysis   → assertPlatformBudget free-tier count gate (server/utils/ai/budget.ts)
+ *  - aiAssistant  → assertChatbotAllowance free-tier turn gate (same file)
  *
  * `limit: null` means "no fixed cap on this tier" (e.g. paid AI is a $ budget,
  * agency roles are unlimited) and is JSON-safe, unlike Infinity.
  */
 import { and, eq, ne, sql } from 'drizzle-orm'
-import { analysisRun, candidateMessage, job } from '../../database/schema'
+import { aiUsageEvent, analysisRun, candidateMessage, job } from '../../database/schema'
 import { resolveOrgPlanId } from './plan'
-import { freeRunLimit } from '../ai/budget'
+import { freeChatbotTurnLimit, freeRunLimit } from '../ai/budget'
 import {
   activeRoleLimitForTier,
   FREE_PLAN_CANDIDATE_CONVERSATION_LIMIT,
@@ -29,6 +30,7 @@ export interface OrgUsage {
   tier: BillingTier
   activeRoles: UsageMeter
   aiAnalysis: UsageMeter
+  aiAssistant: UsageMeter
   candidateConversations: UsageMeter
 }
 
@@ -52,6 +54,22 @@ async function countPlatformRuns(orgId: string): Promise<number> {
       eq(analysisRun.billingMode, 'platform'),
       eq(analysisRun.organizationId, orgId),
       eq(analysisRun.status, 'completed'),
+    ))
+  return Number(row?.total ?? 0)
+}
+
+/**
+ * Count assistant turns an org has used (lifetime, any billing mode). Mirrors
+ * countChatbotTurns in ai/budget.ts — the meter has to show the same number the
+ * gate enforces, including turns a legacy free BYOK config paid for.
+ */
+async function countChatbotTurns(orgId: string): Promise<number> {
+  const [row] = await db
+    .select({ total: sql<string>`count(*)` })
+    .from(aiUsageEvent)
+    .where(and(
+      eq(aiUsageEvent.organizationId, orgId),
+      eq(aiUsageEvent.feature, 'chatbot_message'),
     ))
   return Number(row?.total ?? 0)
 }
@@ -84,9 +102,10 @@ async function countStartedConversations(orgId: string): Promise<number> {
 export async function getOrgUsage(orgId: string): Promise<OrgUsage> {
   const tier = await resolveOrgPlanId(orgId)
 
-  const [openJobs, aiRuns, conversations] = await Promise.all([
+  const [openJobs, aiRuns, assistantTurns, conversations] = await Promise.all([
     countOpenJobs(orgId),
     countPlatformRuns(orgId),
+    countChatbotTurns(orgId),
     countStartedConversations(orgId),
   ])
 
@@ -101,6 +120,10 @@ export async function getOrgUsage(orgId: string): Promise<OrgUsage> {
     aiAnalysis: {
       used: aiRuns,
       limit: tier === 'free' ? freeRunLimit() : null,
+    },
+    aiAssistant: {
+      used: assistantTurns,
+      limit: tier === 'free' ? freeChatbotTurnLimit() : null,
     },
     candidateConversations: {
       used: conversations,

@@ -82,6 +82,27 @@ export const FREE_PLAN_ANALYSIS_LIMIT = 50
 export const FREE_PLAN_CANDIDATE_CONVERSATION_LIMIT = 5
 
 /**
+ * Lifetime allowance of platform-paid assistant turns for a free org.
+ *
+ * The assistant is available on every plan, but Free gets a *taste*: enough to
+ * reach the moment it becomes useful, not enough to live in. Twenty is roughly
+ * three real sessions — the first question is exploratory, the second is badly
+ * phrased, the third is the one that lands, so a five-turn allowance would read
+ * as a broken demo rather than a capped feature.
+ *
+ * Lifetime rather than monthly on purpose: a monthly reset teaches people to
+ * wait instead of upgrade, and recurs the cost forever on orgs that will never
+ * convert. Same grammar as FREE_PLAN_ANALYSIS_LIMIT above.
+ *
+ * Counts assistant *responses* (`aiUsageEvent` rows), not user keystrokes. On a
+ * billing-enabled installation, hosted Free orgs cannot add BYOK, so every new
+ * free turn is platform-paid and this count is the whole gate. Billing-disabled
+ * self-hosted installations do not enforce this SaaS quota. Override hosted
+ * Free with AI_FREE_PLAN_CHATBOT_TURN_LIMIT. Enforced in server/utils/ai/budget.ts.
+ */
+export const FREE_PLAN_CHATBOT_TURN_LIMIT = 20
+
+/**
  * Paid, self-serve plans. Mirrors the marketing pricing page (pricing-v5). Free
  * needs no checkout; Agency is contact-sales, so neither appears here.
  */
@@ -97,6 +118,7 @@ export const BILLING_PLANS: BillingPlan[] = [
       'Up to 2 active roles',
       'Unlimited applicants and hires per role',
       'Unlimited AI shortlists on every role',
+      'AI assistant — chat with your pipeline',
       'Bring your own AI key (BYOK)',
       'Full shortlist workflow',
       'Branded career page for your open roles',
@@ -181,7 +203,8 @@ export type PlanFeature =
   | 'sso' // SSO / SAML / SCIM provider registration — Scale and above
   | 'auditLog' // The org-wide audit log — Scale and above
   | 'retention' // Data-retention policy controls — Scale and above
-  | 'byok' // Bring-your-own AI key configuration — available on every plan
+  | 'byok' // Bring-your-own AI key configuration — Solo and above
+  | 'chatbot' // The AI assistant (chatbot) — every plan; Free is turn-limited
 
 /** Tiers ordered cheapest → most capable. A tier is entitled to a feature when
  *  its rank is ≥ the feature's minimum tier rank. */
@@ -216,7 +239,16 @@ export const FEATURE_MIN_TIER: Record<PlanFeature, BillingTier> = {
   sso: 'scale',
   auditLog: 'scale',
   retention: 'scale',
-  byok: 'free',
+  // BYOK is a paid capability, not a free escape hatch. A free org that brings
+  // its own key would get the uncapped assistant for nothing, which is exactly
+  // the upgrade this tier exists to sell. Grandfathered orgs outrank Solo here
+  // and keep BYOK — it is the only way they can run AI at all.
+  byok: 'solo',
+  // Available on every plan. Free is metered by a lifetime turn count
+  // (FREE_PLAN_CHATBOT_TURN_LIMIT) rather than blocked outright: an assistant
+  // nobody has talked to sells nothing, and a turn is a perfectly good unit to
+  // meter against now that aiUsageEvent records one row per turn.
+  chatbot: 'free',
 }
 
 /** Short, user-facing label for each feature, used in upgrade prompts. */
@@ -232,6 +264,7 @@ export const FEATURE_LABEL: Record<PlanFeature, string> = {
   auditLog: 'The audit log',
   retention: 'Retention controls',
   byok: 'Bring your own AI key',
+  chatbot: 'The AI assistant',
 }
 
 function tierRank(tier: BillingTier): number {

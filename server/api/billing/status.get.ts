@@ -101,6 +101,9 @@ export default defineEventHandler(async (event) => {
 
   const enabled = isStripeBillingConfigured(env)
   if (!enabled) {
+    // Billing-disabled self-hosted instances do not enforce SaaS usage quotas.
+    // `usage: null` is therefore the client contract for uncapped, not hidden
+    // usage; useChatbotQuota deliberately maps it to a null (unlimited) limit.
     return { enabled: false, subscription: null, usage: null }
   }
 

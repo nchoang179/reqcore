@@ -51,9 +51,11 @@ export default defineEventHandler(async (event) => {
   if (await canUsePlatformAi(orgId)) {
     const platformOverride = await getPlatformAiOverride(orgId)
     const anyByokAnalysisDefault = mapped.some(c => c.isDefaultAnalysis)
+    const anyByokChatbotDefault = mapped.some(c => c.isDefaultChatbot)
     mapped.push(
       toPlatformAiConfigListRow(platformOverride, {
         isDefaultAnalysisFallback: !anyByokAnalysisDefault,
+        isDefaultChatbotFallback: !anyByokChatbotDefault,
       }),
     )
   }

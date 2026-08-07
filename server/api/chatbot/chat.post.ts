@@ -10,7 +10,15 @@ import {
   createLanguageModel,
   type SupportedProvider,
 } from '../../utils/ai/provider'
-import { loadAiConfig } from '../../utils/ai/loadConfig'
+import { resolveChatbotProvider } from '../../utils/ai/resolveProvider'
+import { PLATFORM_AI_CONFIG_ID } from '../../utils/ai/platformConfig'
+import {
+  assertChatbotAllowance,
+  BudgetExceededError,
+  budgetErrorToHttp,
+} from '../../utils/ai/budget'
+import { recordAiUsage } from '../../utils/ai/usage'
+import { platformPinUpdate } from '../../utils/chatbotConversation'
 import { buildChatbotTools } from '../../utils/ai/chatTools'
 import { getChatbotAttachments } from '../../utils/chatbotAttachments'
 import { requireChatbotAccess } from '../../utils/chatbotAccess'
@@ -130,13 +138,28 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 404, statusMessage: 'Conversation not found.' })
   }
 
-  // ── Load AI config (override → conversation pin → org chatbot default) ──
+  // ── Resolve the engine (override → conversation pin → org chatbot default) ──
+  // The pin lives in two columns: `aiConfigId` for a BYOK config, `usePlatformAi`
+  // for the platform engine (which has no ai_config row to point at).
+  const conversationPin = conversation.usePlatformAi
+    ? PLATFORM_AI_CONFIG_ID
+    : conversation.aiConfigId
   const preferredAiConfigId =
-    body.aiConfigId !== undefined ? body.aiConfigId : conversation.aiConfigId
-  const config = await loadAiConfig(orgId, {
-    purpose: 'chatbot',
-    preferId: preferredAiConfigId,
-  })
+    body.aiConfigId !== undefined ? body.aiConfigId : conversationPin
+
+  const resolved = await resolveChatbotProvider(orgId, { preferId: preferredAiConfigId })
+  const config = resolved.providerConfig
+
+  // Checked before the stream opens, so a capped org gets a clean 429 rather
+  // than a dead stream. Covers both the platform budget (our OpenRouter key)
+  // and the free tier's lifetime turn allowance.
+  try {
+    await assertChatbotAllowance(orgId, resolved.billingMode)
+  }
+  catch (err) {
+    if (err instanceof BudgetExceededError) throw budgetErrorToHttp(err)
+    throw err
+  }
 
   // ── Resolve scope label ──
   let scopeLabel = 'entire organization'
@@ -222,7 +245,11 @@ export default defineEventHandler(async (event) => {
     updatedAt: new Date(),
   }
   if (body.agentId !== undefined) conversationUpdates.agentId = body.agentId
-  if (body.aiConfigId !== undefined) conversationUpdates.aiConfigId = body.aiConfigId
+  // '__platform__' is not an ai_config row — it pins the platform engine via its
+  // own flag, so both columns are always written together.
+  if (body.aiConfigId !== undefined) {
+    Object.assign(conversationUpdates, platformPinUpdate(body.aiConfigId))
+  }
   if (body.scope) conversationUpdates.scope = body.scope
   if (isFirstMessage && conversation.title === 'New chat') {
     updatedTitle = autoTitleFromMessage(lastUser.content)
@@ -437,25 +464,39 @@ export default defineEventHandler(async (event) => {
           console.error('[chatbot] failed to persist assistant message', persistErr)
         }
 
-        // PostHog LLM observability. The chatbot always runs on the org's own
-        // AI config (loadAiConfig never returns the platform key), so it is
-        // always BYOK. One event per turn, grouped under the conversation trace.
+        // Spend ledger — the budget gate reads this, so platform turns must be
+        // recorded even when the stream ended badly (tokens were still spent).
+        const turnCostUsdMicros = finalUsage
+          ? computeCostUsdMicros(resolved.model, finalUsage.prompt, finalUsage.completion)
+          : null
+        await recordAiUsage({
+          orgId,
+          userId: session.user.id,
+          feature: 'chatbot_message',
+          provider: resolved.provider,
+          model: resolved.model,
+          billingMode: resolved.billingMode,
+          promptTokens: finalUsage?.prompt ?? null,
+          completionTokens: finalUsage?.completion ?? null,
+          costUsdMicros: turnCostUsdMicros,
+        })
+
+        // PostHog LLM observability. One event per turn, grouped under the
+        // conversation trace. `billingMode` mirrors the ledger row above.
         captureAiGeneration({
           orgId,
           userId: session.user.id,
           conversationId: conversation.id,
           traceId: conversation.id,
           feature: 'chatbot_message',
-          provider: config.provider,
-          model: config.model,
-          billingMode: 'byok',
+          provider: resolved.provider,
+          model: resolved.model,
+          billingMode: resolved.billingMode,
           promptTokens: finalUsage?.prompt ?? 0,
           completionTokens: finalUsage?.completion ?? 0,
           reasoningTokens: finalUsage?.reasoning,
           cacheReadTokens: finalUsage?.cached,
-          costUsdMicros: finalUsage
-            ? computeCostUsdMicros(config.model, finalUsage.prompt, finalUsage.completion)
-            : null,
+          costUsdMicros: turnCostUsdMicros,
           latencyMs: Date.now() - startedAt,
           status: finalUsage ? 'completed' : 'failed',
         })

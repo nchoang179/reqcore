@@ -2,7 +2,12 @@ import { and, eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { aiConfig, chatbotAgent, chatbotConversation, chatbotFolder, job } from '../../../database/schema'
 import { requireChatbotAccess } from '../../../utils/chatbotAccess'
-import type { ChatbotConversationSummary, ChatbotScope } from '../../../../shared/chatbot'
+import {
+  isPlatformEngineId,
+  platformPinUpdate,
+  toConversationSummary,
+} from '../../../utils/chatbotConversation'
+import type { ChatbotConversationSummary } from '../../../../shared/chatbot'
 
 const bodySchema = z.object({
   title: z.string().min(1).max(120).trim().optional(),
@@ -52,7 +57,8 @@ export default defineEventHandler(async (event): Promise<{ conversation: Chatbot
     })
     if (!a) throw createError({ statusCode: 404, statusMessage: 'Agent not found.' })
   }
-  if (body.aiConfigId) {
+  // The platform engine has no ai_config row — see index.post.ts.
+  if (body.aiConfigId && !isPlatformEngineId(body.aiConfigId)) {
     const c = await db.query.aiConfig.findFirst({
       where: and(eq(aiConfig.id, body.aiConfigId), eq(aiConfig.organizationId, orgId)),
       columns: { id: true },
@@ -74,7 +80,7 @@ export default defineEventHandler(async (event): Promise<{ conversation: Chatbot
   if (body.title !== undefined) updates.title = body.title
   if (body.folderId !== undefined) updates.folderId = body.folderId
   if (body.agentId !== undefined) updates.agentId = body.agentId
-  if (body.aiConfigId !== undefined) updates.aiConfigId = body.aiConfigId
+  if (body.aiConfigId !== undefined) Object.assign(updates, platformPinUpdate(body.aiConfigId))
   if (body.scope !== undefined) updates.scope = body.scope
   if (body.thinking !== undefined) updates.thinking = body.thinking
   if (body.pinned !== undefined) updates.pinned = body.pinned
@@ -92,19 +98,5 @@ export default defineEventHandler(async (event): Promise<{ conversation: Chatbot
     throw createError({ statusCode: 404, statusMessage: 'Conversation not found.' })
   }
 
-  return {
-    conversation: {
-      id: updated.id,
-      title: updated.title,
-      folderId: updated.folderId,
-      agentId: updated.agentId,
-      aiConfigId: updated.aiConfigId,
-      scope: (updated.scope ?? { kind: 'organization' }) as ChatbotScope,
-      pinned: updated.pinned,
-      thinking: updated.thinking,
-      lastMessagePreview: updated.lastMessagePreview,
-      lastMessageAt: updated.lastMessageAt ? updated.lastMessageAt.getTime() : null,
-      createdAt: updated.createdAt.getTime(),
-    },
-  }
+  return { conversation: toConversationSummary(updated) }
 })

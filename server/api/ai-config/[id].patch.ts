@@ -42,13 +42,21 @@ export default defineEventHandler(async (event) => {
     const enabled = body.isEnabled
     const existingOverride = await getPlatformAiOverride(orgId)
     const wasDefaultAnalysis = existingOverride?.isDefaultAnalysis ?? false
-    const byokAnalysisDefaultCount = await db.$count(
-      aiConfig,
-      and(eq(aiConfig.organizationId, orgId), eq(aiConfig.isDefaultAnalysis, true)),
-    )
-    // When enabling, claim the analysis slot if nothing else holds it — so the
-    // org always has a working, visibly-marked analysis engine.
+    const wasDefaultChatbot = existingOverride?.isDefaultChatbot ?? false
+    const [byokAnalysisDefaultCount, byokChatbotDefaultCount] = await Promise.all([
+      db.$count(
+        aiConfig,
+        and(eq(aiConfig.organizationId, orgId), eq(aiConfig.isDefaultAnalysis, true)),
+      ),
+      db.$count(
+        aiConfig,
+        and(eq(aiConfig.organizationId, orgId), eq(aiConfig.isDefaultChatbot, true)),
+      ),
+    ])
+    // When enabling, claim each slot if nothing else holds it — so the org
+    // always has a working, visibly-marked engine for analysis and the assistant.
     const isDefaultAnalysis = enabled && (wasDefaultAnalysis || byokAnalysisDefaultCount === 0)
+    const isDefaultChatbot = enabled && (wasDefaultChatbot || byokChatbotDefaultCount === 0)
 
     await db.transaction(async (tx) => {
       await tx.insert(platformAiConfig)
@@ -56,6 +64,7 @@ export default defineEventHandler(async (event) => {
           organizationId: orgId,
           provider: PLATFORM_AI_PROVIDER,
           isDefaultAnalysis,
+          isDefaultChatbot,
           isEnabled: enabled,
         })
         .onConflictDoUpdate({
@@ -63,13 +72,14 @@ export default defineEventHandler(async (event) => {
           set: {
             isEnabled: enabled,
             isDefaultAnalysis,
+            isDefaultChatbot,
             updatedAt: new Date(),
           },
         })
 
-      // If we just disabled the analysis default, promote the newest BYOK
-      // config so the org doesn't silently lose candidate analysis.
-      if (!enabled && wasDefaultAnalysis) {
+      // If we just disabled an engine that held a default slot, promote the
+      // newest BYOK config so the org doesn't silently lose that capability.
+      if (!enabled && (wasDefaultAnalysis || wasDefaultChatbot)) {
         const successor = await tx.query.aiConfig.findFirst({
           where: eq(aiConfig.organizationId, orgId),
           orderBy: (t, { desc }) => [desc(t.createdAt)],
@@ -77,7 +87,11 @@ export default defineEventHandler(async (event) => {
         })
         if (successor) {
           await tx.update(aiConfig)
-            .set({ isDefaultAnalysis: true, updatedAt: new Date() })
+            .set({
+              ...(wasDefaultAnalysis ? { isDefaultAnalysis: true } : {}),
+              ...(wasDefaultChatbot ? { isDefaultChatbot: true } : {}),
+              updatedAt: new Date(),
+            })
             .where(eq(aiConfig.id, successor.id))
         }
       }
@@ -92,14 +106,21 @@ export default defineEventHandler(async (event) => {
       metadata: { source: 'platform', isEnabled: enabled },
     })
 
-    const anyByokAnalysisDefault = await db.$count(
-      aiConfig,
-      and(eq(aiConfig.organizationId, orgId), eq(aiConfig.isDefaultAnalysis, true)),
-    )
+    const [anyByokAnalysisDefault, anyByokChatbotDefault] = await Promise.all([
+      db.$count(
+        aiConfig,
+        and(eq(aiConfig.organizationId, orgId), eq(aiConfig.isDefaultAnalysis, true)),
+      ),
+      db.$count(
+        aiConfig,
+        and(eq(aiConfig.organizationId, orgId), eq(aiConfig.isDefaultChatbot, true)),
+      ),
+    ])
     const updated = await getPlatformAiOverride(orgId)
     return {
       config: toPlatformAiConfigListRow(updated, {
         isDefaultAnalysisFallback: anyByokAnalysisDefault === 0,
+        isDefaultChatbotFallback: anyByokChatbotDefault === 0,
       }),
     }
   }

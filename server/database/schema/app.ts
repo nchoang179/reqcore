@@ -940,6 +940,12 @@ export const platformAiConfig = pgTable('platform_ai_config', {
   inputPricePer1m: numeric('input_price_per_1m', { precision: 10, scale: 4 }),
   outputPricePer1m: numeric('output_price_per_1m', { precision: 10, scale: 4 }),
   isDefaultAnalysis: boolean('is_default_analysis').notNull().default(true),
+  /**
+   * Whether the platform engine powers the assistant when the org has pinned no
+   * BYOK chatbot config. Defaults true so a Solo org that never opens Settings →
+   * AI still has a working assistant on our OpenRouter key.
+   */
+  isDefaultChatbot: boolean('is_default_chatbot').notNull().default(true),
   isEnabled: boolean('is_enabled').notNull().default(true),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
@@ -1067,6 +1073,43 @@ export const analysisRun = pgTable('analysis_run', {
   index('analysis_run_organization_id_idx').on(t.organizationId),
   index('analysis_run_application_id_idx').on(t.applicationId),
   index('analysis_run_created_at_idx').on(t.createdAt),
+]))
+
+/** Which product surface spent the tokens. */
+export const aiUsageFeatureEnum = pgEnum('ai_usage_feature', ['chatbot_message'])
+
+/**
+ * Spend ledger for platform-paid LLM calls that are NOT analysis runs.
+ *
+ * The budget gate (utils/ai/budget.ts) originally summed `analysisRun` alone,
+ * which worked while every platform-paid call scored an application. The
+ * assistant broke that assumption: its turns have no `applicationId` (a NOT NULL
+ * FK on analysisRun), so they cannot be recorded there, and spend the gate can't
+ * see is spend it can't cap. Every non-analysis platform call lands here instead
+ * and the gate sums both tables.
+ *
+ * BYOK turns are written too — it's the org's own bill, so it never counts
+ * against a cap, but the usage stays visible.
+ */
+export const aiUsageEvent = pgTable('ai_usage_event', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  organizationId: text('organization_id').notNull().references(() => organization.id, { onDelete: 'cascade' }),
+  userId: text('user_id').references(() => user.id, { onDelete: 'set null' }),
+  feature: aiUsageFeatureEnum('feature').notNull(),
+  provider: text('provider').notNull(),
+  model: text('model').notNull(),
+  promptTokens: integer('prompt_tokens'),
+  completionTokens: integer('completion_tokens'),
+  /** Frozen µ$ cost, same convention as analysisRun.costUsdMicros. */
+  costUsdMicros: integer('cost_usd_micros'),
+  billingMode: analysisBillingModeEnum('billing_mode').notNull().default('byok'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+}, (t) => ([
+  // The budget gate's hot path: platform spend for one org since a timestamp.
+  index('ai_usage_event_org_billing_created_idx')
+    .on(t.organizationId, t.billingMode, t.createdAt),
+  // The global daily kill-switch scans across all orgs.
+  index('ai_usage_event_billing_created_idx').on(t.billingMode, t.createdAt),
 ]))
 
 // ─────────────────────────────────────────────
@@ -1405,6 +1448,13 @@ export const chatbotConversation = pgTable('chatbot_conversation', {
   agentId: text('agent_id').references(() => chatbotAgent.id, { onDelete: 'set null' }),
   /** AI configuration last used for this conversation. Falls back to org chatbot default. */
   aiConfigId: text('ai_config_id').references(() => aiConfig.id, { onDelete: 'set null' }),
+  /**
+   * The platform ("Reqcore AI") engine is pinned to this conversation. It cannot
+   * live in `aiConfigId` — that column is a real FK to ai_config and the platform
+   * engine has no row there — so the choice needs its own flag. Mutually
+   * exclusive with aiConfigId; the API clears one when setting the other.
+   */
+  usePlatformAi: boolean('use_platform_ai').notNull().default(false),
   /** Human-friendly title. Auto-generated from the first user message if absent. */
   title: text('title').notNull().default('New chat'),
   /** Scope at the time of last message: { kind: 'organization' } or { kind: 'job', jobId } */

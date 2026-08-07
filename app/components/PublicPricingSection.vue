@@ -5,7 +5,12 @@ import {
   Cloud,
   LifeBuoy,
 } from 'lucide-vue-next'
-import { BILLING_PLANS, type BillingPlan, type BillingPlanId } from '~~/shared/billing'
+import {
+  BILLING_PLANS,
+  FREE_PLAN_CHATBOT_TURN_LIMIT,
+  type BillingPlan,
+  type BillingPlanId,
+} from '~~/shared/billing'
 
 type PlanCard = {
   id: string
@@ -78,6 +83,7 @@ const paidPlanFeatures: Record<BillingPlanId, { heading: string; features: strin
     features: [
       'Up to 2 active roles',
       'Unlimited AI shortlists on every role',
+      'AI assistant — chat with your pipeline',
       'Unlimited hires per role',
       'Full shortlist workflow',
       'Custom scoring criteria',
@@ -141,7 +147,7 @@ const plans = computed<PlanCard[]>(() => [
       'Unlimited team members',
       'AI shortlist ranking',
       'Your first AI shortlist free, no card',
-      'Bring your own AI key for unlimited shortlists after that',
+      `${FREE_PLAN_CHATBOT_TURN_LIMIT} AI assistant messages to try it on your own pipeline`,
       'Branded application forms',
       'Resume parsing and candidate profiles',
       '5 candidate conversations, unlimited replies',

@@ -146,9 +146,12 @@ function isNavLocked(item: { feature?: PlanFeature }): boolean {
 // Items shown only when their feature flag is enabled. Filtered into mainNav
 // reactively so the gating happens at render time (PostHog flags load async).
 const flaggedNav = computed(() => {
-  const items: Array<{ label: string; to: string; icon: typeof Briefcase; exact: boolean; afterLabel: string }> = []
+  const items: Array<{ label: string; to: string; icon: typeof Briefcase; exact: boolean; afterLabel: string; feature?: PlanFeature }> = []
+  // The flag controls whether the assistant has shipped; `feature` controls
+  // whether this org's plan includes it. An unentitled org still sees the item
+  // (with a lock) and lands on the page's upgrade card — same as Timeline.
   if (showChatbot.value) {
-    items.push({ label: 'Assistant', to: '/dashboard/chatbot', icon: MessageCircle, exact: false, afterLabel: 'AI Analysis' })
+    items.push({ label: 'Assistant', to: '/dashboard/chatbot', icon: MessageCircle, exact: false, afterLabel: 'AI Analysis', feature: 'chatbot' })
   }
   return items
 })
@@ -159,7 +162,7 @@ const navItems = computed(() => {
     const idx = merged.findIndex((n) => n.label === item.afterLabel)
     const insertAt = idx >= 0 ? idx + 1 : merged.length
     merged.splice(insertAt, 0, {
-      label: item.label, to: item.to, icon: item.icon, exact: item.exact,
+      label: item.label, to: item.to, icon: item.icon, exact: item.exact, feature: item.feature,
     })
   }
   return merged

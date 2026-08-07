@@ -2,11 +2,11 @@ import { and, asc, eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { chatbotConversation, chatbotMessage } from '../../../database/schema'
 import { requireChatbotAccess } from '../../../utils/chatbotAccess'
+import { toConversationSummary } from '../../../utils/chatbotConversation'
 import type {
   ChatbotAttachment,
   ChatbotConversationDetail,
   ChatbotMessage,
-  ChatbotScope,
   ChatbotSource,
   ChatbotToolCall,
 } from '../../../../shared/chatbot'
@@ -47,17 +47,7 @@ export default defineEventHandler(async (event): Promise<{ conversation: Chatbot
 
   return {
     conversation: {
-      id: conv.id,
-      title: conv.title,
-      folderId: conv.folderId,
-      agentId: conv.agentId,
-      aiConfigId: conv.aiConfigId,
-      scope: (conv.scope ?? { kind: 'organization' }) as ChatbotScope,
-      pinned: conv.pinned,
-      thinking: conv.thinking,
-      lastMessagePreview: conv.lastMessagePreview,
-      lastMessageAt: conv.lastMessageAt ? conv.lastMessageAt.getTime() : null,
-      createdAt: conv.createdAt.getTime(),
+      ...toConversationSummary(conv),
       messages,
     },
   }

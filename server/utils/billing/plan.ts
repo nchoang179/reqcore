@@ -30,17 +30,20 @@ import { STRIPE_BILLING_ENV_KEYS, isStripeBillingConfigured } from '../env'
  */
 const PAID_ENTITLEMENT_STATUSES = ['active', 'trialing', 'past_due']
 
+function stripeBillingEnv(): Record<typeof STRIPE_BILLING_ENV_KEYS[number], string | undefined> {
+  return Object.fromEntries(
+    STRIPE_BILLING_ENV_KEYS.map(key => [key, process.env[key]]),
+  ) as Record<typeof STRIPE_BILLING_ENV_KEYS[number], string | undefined>
+}
+
 /**
- * True only in a real production deployment — not local dev, CI, or test. Matches
- * the gate used elsewhere (e.g. api/public/jobs apply throttle). Used to decide
- * whether an unconfigured Stripe setup is a dev convenience or production drift.
+ * Whether billing was intentionally disabled by leaving every Stripe variable
+ * unset. This is the normal self-hosted mode and is distinct from a partial
+ * Stripe setup, which is configuration drift and must not unlock paid features.
  */
-function isProductionDeployment(): boolean {
-  return (
-    process.env.NODE_ENV === 'production' &&
-    !process.env.CI &&
-    !process.env.GITHUB_ACTIONS
-  )
+export function isBillingDisabled(): boolean {
+  const config = stripeBillingEnv()
+  return STRIPE_BILLING_ENV_KEYS.every(key => !config[key])
 }
 
 /**
@@ -182,26 +185,22 @@ export function assertTierFeature(tier: BillingTier, feature: PlanFeature): void
  * H3 402 if not. Returns the resolved tier so the caller can reuse it for
  * further per-tier decisions without a second lookup.
  *
- * Billing is always configured on the hosted SaaS, so an unconfigured Stripe
- * setup is only ever legitimate in local dev / CI — where there are no real
- * subscriptions and unlocking everything is the convenient default. In a real
- * production deployment an unconfigured (or partially configured) Stripe setup
- * is config drift, never a valid state, so we fail *closed*: enforce against the
- * org's stored subscription tier rather than silently granting every paid
- * feature, and log loudly so the drift is detectable.
+ * A completely absent Stripe configuration is the supported self-hosted mode,
+ * so plan features are unlocked there even when NODE_ENV is production. A
+ * partial Stripe configuration is drift: fail closed against the stored tier
+ * and log loudly. The environment schema also rejects partial configuration at
+ * startup, but keeping the distinction here makes the authorization boundary
+ * safe on its own.
  */
 export async function assertPlanFeature(orgId: string, feature: PlanFeature): Promise<BillingTier> {
-  const stripeBillingEnv = Object.fromEntries(
-    STRIPE_BILLING_ENV_KEYS.map(key => [key, process.env[key]]),
-  )
+  const billingEnv = stripeBillingEnv()
 
-  if (!isStripeBillingConfigured(stripeBillingEnv)) {
-    // Dev/CI (no Stripe, no real subscriptions): unlock everything.
-    if (!isProductionDeployment()) return 'scale'
-    // Production drift: never unlock. Fall through to enforce by stored tier.
-    const missing = STRIPE_BILLING_ENV_KEYS.filter(key => !stripeBillingEnv[key])
+  if (STRIPE_BILLING_ENV_KEYS.every(key => !billingEnv[key])) return 'scale'
+
+  if (!isStripeBillingConfigured(billingEnv)) {
+    const missing = STRIPE_BILLING_ENV_KEYS.filter(key => !billingEnv[key])
     console.error(
-      `[Reqcore] Stripe billing not fully configured in production (missing ${missing.join(', ')}); ` +
+      `[Reqcore] Stripe billing is partially configured (missing ${missing.join(', ')}); ` +
         'enforcing plan features by stored subscription tier instead of unlocking. ' +
         'Restore the missing Stripe variables to resume normal billing.',
     )

@@ -15,7 +15,9 @@ export default defineEventHandler(async (event) => {
   const session = await requirePermission(event, { scoring: ['create'] })
   const orgId = session.session.activeOrganizationId
 
-  // Bring-your-own AI key (BYOK) configuration is available on every plan.
+  // Bring-your-own AI key (BYOK) is a Solo-and-above capability. Only creation
+  // is gated: a free org that configured a key before the gate existed keeps
+  // editing and using it, so this never silently switches anyone's AI off.
   await assertPlanFeature(orgId, 'byok')
 
   const body = await readValidatedBody(event, createAiConfigSchema.parse)
@@ -34,6 +36,12 @@ export default defineEventHandler(async (event) => {
       await tx.update(aiConfig)
         .set({ isDefaultChatbot: false })
         .where(eq(aiConfig.organizationId, orgId))
+      // The platform engine holds the chatbot slot by default, so it has to
+      // yield it too — otherwise it keeps winning resolveChatbotProvider and
+      // the user's newly-chosen default never runs.
+      await tx.update(platformAiConfig)
+        .set({ isDefaultChatbot: false, updatedAt: new Date() })
+        .where(eq(platformAiConfig.organizationId, orgId))
     }
     if (isDefaultAnalysis) {
       await tx.update(aiConfig)

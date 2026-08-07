@@ -2,7 +2,12 @@ import { and, eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { aiConfig, chatbotAgent, chatbotConversation, chatbotFolder, job } from '../../../database/schema'
 import { requireChatbotAccess } from '../../../utils/chatbotAccess'
-import type { ChatbotConversationSummary, ChatbotScope } from '../../../../shared/chatbot'
+import {
+  isPlatformEngineId,
+  platformPinUpdate,
+  toConversationSummary,
+} from '../../../utils/chatbotConversation'
+import type { ChatbotConversationSummary } from '../../../../shared/chatbot'
 
 const bodySchema = z.object({
   title: z.string().min(1).max(120).trim().optional(),
@@ -52,8 +57,10 @@ export default defineEventHandler(async (event): Promise<{ conversation: Chatbot
     if (!a) throw createError({ statusCode: 404, statusMessage: 'Agent not found.' })
   }
 
-  // Validate AI config ownership.
-  if (body.aiConfigId) {
+  // Validate AI config ownership. The platform engine is not an ai_config row,
+  // so it skips this check — access to it is decided by canUsePlatformAi at
+  // send time, not by org ownership of a config.
+  if (body.aiConfigId && !isPlatformEngineId(body.aiConfigId)) {
     const c = await db.query.aiConfig.findFirst({
       where: and(eq(aiConfig.id, body.aiConfigId), eq(aiConfig.organizationId, orgId)),
       columns: { id: true },
@@ -78,7 +85,7 @@ export default defineEventHandler(async (event): Promise<{ conversation: Chatbot
     userId,
     folderId: body.folderId ?? null,
     agentId: body.agentId ?? null,
-    aiConfigId: body.aiConfigId ?? null,
+    ...platformPinUpdate(body.aiConfigId ?? null),
     title: body.title ?? 'New chat',
     scope: body.scope,
     thinking: body.thinking === true,
@@ -88,19 +95,5 @@ export default defineEventHandler(async (event): Promise<{ conversation: Chatbot
     throw createError({ statusCode: 500, statusMessage: 'Failed to create conversation.' })
   }
 
-  return {
-    conversation: {
-      id: created.id,
-      title: created.title,
-      folderId: created.folderId,
-      agentId: created.agentId,
-      aiConfigId: created.aiConfigId,
-      scope: (created.scope ?? { kind: 'organization' }) as ChatbotScope,
-      pinned: created.pinned,
-      thinking: created.thinking,
-      lastMessagePreview: created.lastMessagePreview,
-      lastMessageAt: created.lastMessageAt ? created.lastMessageAt.getTime() : null,
-      createdAt: created.createdAt.getTime(),
-    },
-  }
+  return { conversation: toConversationSummary(created) }
 })

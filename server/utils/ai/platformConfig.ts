@@ -20,7 +20,7 @@ export interface PlatformAiConfigListRow {
   maxTokens: number
   inputPricePer1m: number | null
   outputPricePer1m: number | null
-  isDefaultChatbot: false
+  isDefaultChatbot: boolean
   isDefaultAnalysis: boolean
   isEnabled: boolean
   hasApiKey: boolean
@@ -42,7 +42,7 @@ export async function canUsePlatformAi(orgId: string): Promise<boolean> {
 // The platform ("company") AI is server-managed: its model, display name and
 // token cap always come from the environment, never from per-org edits. The
 // only per-org state we honour is whether it is enabled and whether it holds
-// the analysis-default slot.
+// the analysis- and chatbot-default slots.
 function platformModel(): string {
   return env.OPENROUTER_MODEL
 }
@@ -53,11 +53,16 @@ export function platformOverrideEnabled(row: PlatformAiOverride | null): boolean
 
 export function toPlatformAiConfigListRow(
   row: PlatformAiOverride | null,
-  opts: { isDefaultAnalysisFallback?: boolean } = {},
+  opts: { isDefaultAnalysisFallback?: boolean, isDefaultChatbotFallback?: boolean } = {},
 ): PlatformAiConfigListRow {
   const isEnabled = platformOverrideEnabled(row)
   const isDefaultAnalysis = isEnabled
     ? (row?.isDefaultAnalysis ?? opts.isDefaultAnalysisFallback ?? true)
+    : false
+  // Mirrors the analysis slot: the platform engine holds the chatbot default
+  // unless a BYOK config has claimed it (the caller passes that as the fallback).
+  const isDefaultChatbot = isEnabled
+    ? (row?.isDefaultChatbot ?? opts.isDefaultChatbotFallback ?? true)
     : false
   return {
     id: PLATFORM_AI_CONFIG_ID,
@@ -68,7 +73,7 @@ export function toPlatformAiConfigListRow(
     maxTokens: DEFAULT_PLATFORM_MAX_TOKENS,
     inputPricePer1m: row?.inputPricePer1m != null ? Number(row.inputPricePer1m) : null,
     outputPricePer1m: row?.outputPricePer1m != null ? Number(row.outputPricePer1m) : null,
-    isDefaultChatbot: false,
+    isDefaultChatbot,
     isDefaultAnalysis,
     isEnabled,
     hasApiKey: Boolean(env.OPENROUTER_API_KEY),
