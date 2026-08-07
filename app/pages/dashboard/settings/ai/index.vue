@@ -46,7 +46,7 @@ interface ProviderInfo {
   models: { id: string, label: string, description: string, inputPricePer1m?: number, outputPricePer1m?: number, badge?: 'recommended' | 'fast' | 'powerful' | 'cheap' }[]
 }
 
-const { allowed: canManageAi, isLoading: isPermissionLoading } = usePermission({ scoring: ['create'] })
+const { allowed: canManageAi, isLoading: isPermissionLoading } = usePermission({ aiConfig: ['update'] })
 const toast = useToast()
 
 // Bring-your-own AI key (adding a model) is Solo and above.

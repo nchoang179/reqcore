@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm'
 import { aiConfig, platformAiConfig } from '../../database/schema'
 import { createAiConfigSchema } from '../../utils/schemas/scoring'
 import { encrypt } from '../../utils/encryption'
+import { assertSafeAiEndpoint } from '../../utils/ai/safeEndpoint'
 
 /**
  * POST /api/ai-config
@@ -12,7 +13,7 @@ import { encrypt } from '../../utils/encryption'
  * inside the same transaction so exactly one default exists per purpose.
  */
 export default defineEventHandler(async (event) => {
-  const session = await requirePermission(event, { scoring: ['create'] })
+  const session = await requirePermission(event, { aiConfig: ['create'] })
   const orgId = session.session.activeOrganizationId
 
   // Bring-your-own AI key (BYOK) is a Solo-and-above capability. Only creation
@@ -21,6 +22,17 @@ export default defineEventHandler(async (event) => {
   await assertPlanFeature(orgId, 'byok')
 
   const body = await readValidatedBody(event, createAiConfigSchema.parse)
+  if (body.provider === 'openai_compatible') {
+    try {
+      await assertSafeAiEndpoint(body.baseUrl!)
+    }
+    catch (error) {
+      throw createError({
+        statusCode: 422,
+        statusMessage: error instanceof Error ? error.message : 'Custom AI endpoint is not allowed.',
+      })
+    }
+  }
 
   const apiKeyEncrypted = encrypt(body.apiKey, env.BETTER_AUTH_SECRET)
 

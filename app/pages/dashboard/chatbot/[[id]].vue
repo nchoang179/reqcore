@@ -158,6 +158,7 @@ async function handleSubmit() {
   if (isStreaming.value || chatbotQuotaExhausted.value) return
   const content = draft.value
   draft.value = ''
+  shouldFollowGeneration.value = true
   await nextTick(autoResize)
   try {
     await send(content)
@@ -193,16 +194,58 @@ async function handleFileChange(e: Event) {
 
 // ── Auto-scroll on incoming chunks ──
 const scrollerRef = useTemplateRef<HTMLElement>('scroller')
-function scrollToBottom() {
+const messagesListRef = useTemplateRef<HTMLElement>('messagesList')
+const shouldFollowGeneration = ref(true)
+const bottomThreshold = 80
+let messagesResizeObserver: ResizeObserver | null = null
+let scrollFrame: number | null = null
+
+function scrollToBottom(force = false) {
+  const el = scrollerRef.value
+  if (!el || (!force && !shouldFollowGeneration.value)) return
+
+  if (scrollFrame !== null) cancelAnimationFrame(scrollFrame)
+  scrollFrame = requestAnimationFrame(() => {
+    const scroller = scrollerRef.value
+    if (scroller && (force || shouldFollowGeneration.value)) {
+      scroller.scrollTop = scroller.scrollHeight
+    }
+    scrollFrame = null
+  })
+}
+
+function handleScrollerScroll() {
   const el = scrollerRef.value
   if (!el) return
-  el.scrollTop = el.scrollHeight
+  const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+  shouldFollowGeneration.value = distanceFromBottom <= bottomThreshold
 }
+
+// Markdown rendering may finish after the message watcher has run. Observing
+// the rendered list keeps the latest generated text visible as its real DOM
+// height grows, while preserving the user's position if they scroll upward.
+watch(messagesListRef, (list) => {
+  messagesResizeObserver?.disconnect()
+  messagesResizeObserver = null
+  if (!list || typeof ResizeObserver === 'undefined') return
+
+  messagesResizeObserver = new ResizeObserver(() => scrollToBottom())
+  messagesResizeObserver.observe(list)
+})
+
 watch(
   () => messages.value.map((m) => m.content.length + (m.reasoning?.length ?? 0) + (m.toolCalls?.length ?? 0)).join(','),
   () => nextTick(scrollToBottom),
 )
-watch(currentConversationId, () => nextTick(scrollToBottom))
+watch(currentConversationId, () => {
+  shouldFollowGeneration.value = true
+  nextTick(() => scrollToBottom(true))
+})
+
+onUnmounted(() => {
+  messagesResizeObserver?.disconnect()
+  if (scrollFrame !== null) cancelAnimationFrame(scrollFrame)
+})
 
 // ── Suggestions for empty state ──
 const suggestions = computed(() => {
@@ -236,6 +279,18 @@ function formatBytes(bytes: number) {
 
 function toolLabel(name: string) {
   return name.replace(/_/g, ' ')
+}
+
+function formatToolCallData(value: unknown) {
+  if (value === undefined) return 'No data'
+  if (typeof value === 'string') return value
+
+  try {
+    return JSON.stringify(value, null, 2) ?? String(value)
+  }
+  catch {
+    return String(value)
+  }
 }
 
 // ── Right-rail sources panel + Agent manager ──
@@ -404,6 +459,7 @@ async function startNew() {
         v-else
         ref="scroller"
         class="relative flex-1 min-h-0 overflow-y-auto"
+        @scroll.passive="handleScrollerScroll"
       >
         <!-- Empty state -->
         <div v-if="messages.length === 0" class="mx-auto flex h-full max-w-3xl flex-col items-center justify-center px-6 py-12 text-center">
@@ -430,7 +486,7 @@ async function startNew() {
         </div>
 
         <!-- Messages -->
-        <div v-else class="mx-auto max-w-3xl space-y-6 px-4 py-6 sm:px-8">
+        <div v-else ref="messagesList" class="mx-auto max-w-3xl space-y-6 px-4 py-6 sm:px-8">
           <div
             v-for="m in messages"
             :key="m.id"
@@ -488,33 +544,65 @@ async function startNew() {
                     </span>
                     <ChevronDown class="size-3 shrink-0 transition-transform group-open:rotate-180" />
                   </summary>
-                  <div class="space-y-1 border-t border-surface-200 dark:border-surface-800 px-2 py-2">
-                    <div
+                  <div class="space-y-2 border-t border-surface-200 dark:border-surface-800 px-2 py-2">
+                    <details
                       v-for="tc in m.toolCalls"
                       :key="tc.id"
-                      class="flex items-start gap-2 rounded-md px-2 py-1.5"
+                      class="group/call overflow-hidden rounded-md border border-surface-200/80 bg-white/70 dark:border-surface-700/80 dark:bg-surface-900/50"
                     >
-                      <component
-                        :is="tc.status === 'pending' ? Loader2 : tc.status === 'error' ? AlertCircle : Wrench"
-                        class="mt-0.5 size-3.5 shrink-0"
-                        :class="[
-                          tc.status === 'pending' && 'animate-spin text-brand-500',
-                          tc.status === 'success' && 'text-emerald-600 dark:text-emerald-400',
-                          tc.status === 'error' && 'text-danger-500',
-                        ]"
-                      />
-                      <div class="flex-1 min-w-0">
-                        <div class="font-medium text-surface-700 dark:text-surface-200 capitalize">
-                          {{ toolLabel(tc.name) }}
+                      <summary class="flex cursor-pointer select-none list-none items-start gap-2 px-2 py-2">
+                        <component
+                          :is="tc.status === 'pending' ? Loader2 : tc.status === 'error' ? AlertCircle : Wrench"
+                          class="mt-0.5 size-3.5 shrink-0"
+                          :class="[
+                            tc.status === 'pending' && 'animate-spin text-brand-500',
+                            tc.status === 'success' && 'text-emerald-600 dark:text-emerald-400',
+                            tc.status === 'error' && 'text-danger-500',
+                          ]"
+                        />
+                        <div class="min-w-0 flex-1">
+                          <div class="font-medium text-surface-700 dark:text-surface-200 capitalize">
+                            {{ toolLabel(tc.name) }}
+                          </div>
+                          <div class="mt-0.5 text-[10px] capitalize text-surface-400 dark:text-surface-500">
+                            {{ tc.status }}
+                          </div>
                         </div>
+                        <ChevronDown class="mt-0.5 size-3 shrink-0 text-surface-400 transition-transform group-open/call:rotate-180" />
+                      </summary>
+
+                      <div class="space-y-2 border-t border-surface-200/80 px-2 py-2 dark:border-surface-700/80">
+                        <div class="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-surface-400 dark:text-surface-500">
+                          <span>Tool: <span class="font-mono">{{ tc.name }}</span></span>
+                          <span class="break-all">Call ID: {{ tc.id }}</span>
+                        </div>
+
+                        <div>
+                          <div class="mb-1 font-semibold uppercase tracking-wider text-surface-500 dark:text-surface-400">
+                            Arguments
+                          </div>
+                          <pre class="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-surface-100 px-2.5 py-2 font-mono text-[11px] leading-relaxed text-surface-700 select-text dark:bg-surface-950 dark:text-surface-300">{{ formatToolCallData(tc.input) }}</pre>
+                        </div>
+
                         <div
-                          v-if="tc.status === 'error'"
-                          class="mt-0.5 text-danger-600 dark:text-danger-400"
+                          v-if="tc.output !== undefined"
                         >
-                          {{ (tc.output as { error?: string })?.error ?? 'Failed' }}
+                          <div class="mb-1 font-semibold uppercase tracking-wider text-surface-500 dark:text-surface-400">
+                            {{ tc.status === 'error' ? 'Error' : 'Result' }}
+                          </div>
+                          <pre
+                            class="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md px-2.5 py-2 font-mono text-[11px] leading-relaxed select-text"
+                            :class="tc.status === 'error'
+                              ? 'bg-danger-50 text-danger-700 dark:bg-danger-950/30 dark:text-danger-300'
+                              : 'bg-surface-100 text-surface-700 dark:bg-surface-950 dark:text-surface-300'"
+                          >{{ formatToolCallData(tc.output) }}</pre>
+                        </div>
+
+                        <div v-else-if="tc.status === 'pending'" class="text-surface-500 dark:text-surface-400">
+                          Waiting for the tool result…
                         </div>
                       </div>
-                    </div>
+                    </details>
                   </div>
                 </details>
 

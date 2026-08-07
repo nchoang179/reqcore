@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm'
 import { document } from '../database/schema'
-import { parseDocument, type ParsedResume } from './resume-parser'
+import { parseDocumentSafelyIsolated, type ParsedResume } from './resume-parser'
 
 export interface StoredParseableDocument {
   id: string
@@ -16,7 +16,7 @@ export async function parseAndPersistDocument(
   doc: StoredParseableDocument,
 ): Promise<ParsedResume | null> {
   const fileBuffer = await downloadFromS3(doc.storageKey)
-  const parsedContent = await parseDocument(fileBuffer, doc.mimeType)
+  const parsedContent = await parseDocumentSafelyIsolated(fileBuffer, doc.mimeType)
 
   if (!parsedContent) return null
 

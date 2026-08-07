@@ -1501,6 +1501,24 @@ export const chatbotAgentRelations = relations(chatbotAgent, ({ many }) => ({
   conversations: many(chatbotConversation),
 }))
 
+/**
+ * Normalized entity references derived from tool results. These make subject
+ * access and erasure deterministic without retaining raw tool output JSON.
+ */
+export const chatbotMessageEntityReference = pgTable('chatbot_message_entity_reference', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  messageId: text('message_id').notNull().references(() => chatbotMessage.id, { onDelete: 'cascade' }),
+  organizationId: text('organization_id').notNull().references(() => organization.id, { onDelete: 'cascade' }),
+  entityType: text('entity_type').notNull().$type<'job' | 'candidate' | 'application' | 'document' | 'attachment'>(),
+  entityId: text('entity_id').notNull(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+}, (t) => ([
+  uniqueIndex('chatbot_message_entity_reference_unique_idx')
+    .on(t.messageId, t.entityType, t.entityId),
+  index('chatbot_message_entity_reference_lookup_idx')
+    .on(t.organizationId, t.entityType, t.entityId),
+]))
+
 export const chatbotFolderRelations = relations(chatbotFolder, ({ many }) => ({
   conversations: many(chatbotConversation),
 }))
@@ -1514,8 +1532,16 @@ export const chatbotConversationRelations = relations(chatbotConversation, ({ on
   messages: many(chatbotMessage),
 }))
 
-export const chatbotMessageRelations = relations(chatbotMessage, ({ one }) => ({
+export const chatbotMessageRelations = relations(chatbotMessage, ({ one, many }) => ({
   conversation: one(chatbotConversation, { fields: [chatbotMessage.conversationId], references: [chatbotConversation.id] }),
+  entityReferences: many(chatbotMessageEntityReference),
+}))
+
+export const chatbotMessageEntityReferenceRelations = relations(chatbotMessageEntityReference, ({ one }) => ({
+  message: one(chatbotMessage, {
+    fields: [chatbotMessageEntityReference.messageId],
+    references: [chatbotMessage.id],
+  }),
 }))
 
 // ─────────────────────────────────────────────

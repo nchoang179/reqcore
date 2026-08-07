@@ -21,7 +21,7 @@ const paramsSchema = z.object({ id: z.string().min(1) })
  * `is_default_analysis` provide a DB-level backstop.
  */
 export default defineEventHandler(async (event) => {
-  const session = await requirePermission(event, { scoring: ['create'] })
+  const session = await requirePermission(event, { aiConfig: ['update'] })
   const orgId = session.session.activeOrganizationId
   const { id } = await getValidatedRouterParams(event, paramsSchema.parse)
   const body = await readValidatedBody(event, setAiConfigDefaultSchema.parse)

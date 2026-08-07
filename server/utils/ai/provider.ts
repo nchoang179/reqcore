@@ -11,6 +11,7 @@ import { createGoogleGenerativeAI } from '@ai-sdk/google'
 import { generateObject } from 'ai'
 import type { z } from 'zod'
 import { decrypt } from '../encryption'
+import { safeAiEndpointFetch } from './safeEndpoint'
 
 export type SupportedProvider = 'openai' | 'anthropic' | 'google' | 'openai_compatible' | 'openrouter'
 
@@ -161,11 +162,20 @@ export function createLanguageModel(config: ProviderConfig) {
   }
 
   switch (config.provider) {
-    case 'openai':
-    case 'openai_compatible': {
+    case 'openai': {
       const openai = createOpenAI({
         apiKey,
-        ...(config.baseUrl ? { baseURL: config.baseUrl } : {}),
+      })
+      return openai(config.model)
+    }
+    case 'openai_compatible': {
+      if (!config.baseUrl) {
+        throw createError({ statusCode: 500, statusMessage: 'Custom AI endpoint is missing.' })
+      }
+      const openai = createOpenAI({
+        apiKey,
+        baseURL: config.baseUrl,
+        fetch: safeAiEndpointFetch,
       })
       return openai(config.model)
     }
@@ -185,19 +195,21 @@ export function createLanguageModel(config: ProviderConfig) {
         },
         fetch: pinOpenRouterRouting,
       })
-      return openrouter(config.model)
+      // The provider's automatic model factory selects the Responses API for
+      // recent OpenAI models. OpenRouter currently loses tool-call context on
+      // multi-step Responses requests, so use its stable Chat Completions
+      // compatibility endpoint explicitly.
+      return openrouter.chat(config.model)
     }
     case 'anthropic': {
       const anthropic = createAnthropic({
         apiKey,
-        ...(config.baseUrl ? { baseURL: config.baseUrl } : {}),
       })
       return anthropic(config.model)
     }
     case 'google': {
       const google = createGoogleGenerativeAI({
         apiKey,
-        ...(config.baseUrl ? { baseURL: config.baseUrl } : {}),
       })
       return google(config.model)
     }

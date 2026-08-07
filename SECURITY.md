@@ -37,6 +37,21 @@ Given Reqcore's architecture, the highest-priority findings include:
 - Secret leakage or insecure default configuration
 - Injection vulnerabilities in API or DB access paths
 
+## Deployment Hardening
+
+The application enforces an 8 MB chatbot-file ceiling while streaming the
+request and revalidates custom AI endpoint DNS before every outbound request.
+Production deployments should also enforce these controls outside the Node
+process:
+
+- Set the reverse proxy request-body limit for `/api/chatbot/upload` to no more
+  than 8.1 MB (the small margin is for multipart headers).
+- Deny application-container egress to loopback, link-local, RFC1918,
+  carrier-grade NAT, cloud metadata, and other internal network ranges. Permit
+  HTTPS egress only to approved AI providers where an allowlist is practical.
+- Keep redirect following disabled in any outbound proxy used for custom AI
+  endpoints.
+
 ## Safe Harbor
 
 If you act in good faith, avoid privacy violations and service disruption, and give us reasonable time to resolve findings before disclosure, we will treat your research as authorized and welcomed.

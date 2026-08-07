@@ -42,7 +42,7 @@ interface ProviderInfo {
 const route = useRoute()
 const id = computed(() => String(route.params.id))
 
-const { allowed: canManageAi, isLoading: isPermissionLoading } = usePermission({ scoring: ['create'] })
+const { allowed: canManageAi, isLoading: isPermissionLoading } = usePermission({ aiConfig: ['update'] })
 
 const { data: configsData, status: configsStatus } = useFetch<AiConfigRow[]>('/api/ai-config', {
   key: 'ai-configs',

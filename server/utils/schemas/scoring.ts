@@ -1,17 +1,19 @@
 import { z } from 'zod'
+import { parseSafeAiBaseUrl } from '../ai/safeEndpoint'
 
 // ─── AI Config Schemas ────────────────────────────────────────────
 
-const safeBaseUrl = z.string().url().max(500)
-  .refine(url => {
-    try {
-      const parsed = new URL(url)
-      // Block cloud metadata endpoints (SSRF)
-      if (parsed.hostname === '169.254.169.254') return false
-      if (parsed.hostname === 'metadata.google.internal') return false
-      return true
-    } catch { return false }
-  }, 'URL must not target internal metadata endpoints')
+const safeBaseUrl = z.string().url().max(500).superRefine((url, ctx) => {
+  try {
+    parseSafeAiBaseUrl(url)
+  }
+  catch (error) {
+    ctx.addIssue({
+      code: 'custom',
+      message: error instanceof Error ? error.message : 'Custom AI endpoint is not allowed.',
+    })
+  }
+})
 
 export const createAiConfigSchema = z.object({
   name: z.string().min(1).max(80).trim(),
@@ -25,6 +27,13 @@ export const createAiConfigSchema = z.object({
   outputPricePer1m: z.number().min(0).max(9999).nullish(),
   isDefaultChatbot: z.boolean().optional().default(false),
   isDefaultAnalysis: z.boolean().optional().default(false),
+}).superRefine((value, ctx) => {
+  if (value.provider === 'openai_compatible' && !value.baseUrl) {
+    ctx.addIssue({ code: 'custom', path: ['baseUrl'], message: 'A custom HTTPS endpoint is required.' })
+  }
+  if (value.provider !== 'openai_compatible' && value.baseUrl) {
+    ctx.addIssue({ code: 'custom', path: ['baseUrl'], message: 'Only custom OpenAI-compatible providers accept a base URL.' })
+  }
 })
 
 export const updateAiConfigSchema = z.object({

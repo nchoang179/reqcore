@@ -109,6 +109,12 @@ their normal rotation schedule rather than being purged on demand (the standard
 GDPR posture). **After restoring any backup, re-run the cleanup job** so that
 candidates past their purge date are erased again and not silently resurrected.
 
+Chatbot conversations have a separate 180-day inactivity retention period. The
+built-in daily retention task deletes expired conversations and their messages,
+tool metadata, sources, and typed entity references through database cascades.
+Candidate export and erasure use those typed references so candidate-derived
+chatbot messages are included in access exports and redacted during erasure.
+
 ## Controller / processor split
 
 The organization is the **data controller**. For data-subject access, erasure, or

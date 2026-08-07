@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { aiConfig, platformAiConfig } from '../../database/schema'
 import { updateAiConfigSchema } from '../../utils/schemas/scoring'
 import { encrypt } from '../../utils/encryption'
+import { assertSafeAiEndpoint } from '../../utils/ai/safeEndpoint'
 import {
   canUsePlatformAi,
   getPlatformAiOverride,
@@ -24,7 +25,7 @@ const paramsSchema = z.object({ id: z.string().min(1) })
  * on or off for this workspace.
  */
 export default defineEventHandler(async (event) => {
-  const session = await requirePermission(event, { scoring: ['create'] })
+  const session = await requirePermission(event, { aiConfig: ['update'] })
   const orgId = session.session.activeOrganizationId
   const { id } = await getValidatedRouterParams(event, paramsSchema.parse)
   const body = await readValidatedBody(event, updateAiConfigSchema.parse)
@@ -127,9 +128,29 @@ export default defineEventHandler(async (event) => {
 
   const existing = await db.query.aiConfig.findFirst({
     where: and(eq(aiConfig.id, id), eq(aiConfig.organizationId, orgId)),
-    columns: { id: true },
+    columns: { id: true, provider: true, baseUrl: true },
   })
   if (!existing) throw createError({ statusCode: 404, statusMessage: 'AI configuration not found.' })
+
+  const effectiveProvider = body.provider ?? existing.provider
+  const effectiveBaseUrl = body.baseUrl !== undefined ? body.baseUrl : existing.baseUrl
+  if (effectiveProvider === 'openai_compatible') {
+    if (!effectiveBaseUrl) {
+      throw createError({ statusCode: 422, statusMessage: 'A custom HTTPS endpoint is required.' })
+    }
+    try {
+      await assertSafeAiEndpoint(effectiveBaseUrl)
+    }
+    catch (error) {
+      throw createError({
+        statusCode: 422,
+        statusMessage: error instanceof Error ? error.message : 'Custom AI endpoint is not allowed.',
+      })
+    }
+  }
+  else if (effectiveBaseUrl) {
+    throw createError({ statusCode: 422, statusMessage: 'Only custom OpenAI-compatible providers accept a base URL.' })
+  }
 
   const updates: Record<string, unknown> = { updatedAt: new Date() }
   if (body.name !== undefined) updates.name = body.name

@@ -16,7 +16,7 @@ const paramsSchema = z.object({ id: z.string().min(1) })
  * SET NULL and the chat handler falls back to the org default.
  */
 export default defineEventHandler(async (event) => {
-  const session = await requirePermission(event, { scoring: ['create'] })
+  const session = await requirePermission(event, { aiConfig: ['delete'] })
   const orgId = session.session.activeOrganizationId
   const { id } = await getValidatedRouterParams(event, paramsSchema.parse)
 

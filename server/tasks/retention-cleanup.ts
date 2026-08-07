@@ -1,13 +1,15 @@
 import { defineTask } from 'nitropack/runtime/task'
 import { runRetentionCleanup } from '../utils/retention-cleanup'
+import { pruneExpiredChatbotConversations } from '../utils/chatbotRetention'
 
 export default defineTask({
   meta: {
     name: 'retention-cleanup',
-    description: 'Quarantine and erase candidates according to organization retention policies',
+    description: 'Prune expired chats and erase candidates according to retention policies',
   },
   async run() {
+    const chatbotConversationsDeleted = await pruneExpiredChatbotConversations()
     const result = await runRetentionCleanup({ source: 'scheduled_task' })
-    return { result }
+    return { result: { ...result, chatbotConversationsDeleted } }
   },
 })

@@ -15,6 +15,13 @@
 /** Maximum size for chatbot file uploads (8 MB). */
 export const CHATBOT_MAX_UPLOAD_BYTES = 8 * 1024 * 1024
 
+/** Extracted text is capped before it enters the in-memory attachment store. */
+export const CHATBOT_MAX_STORED_ATTACHMENT_CHARS = 40_000
+
+/** Aggregate UTF-8 text retained per user and per organization. */
+export const CHATBOT_MAX_STORED_BYTES_PER_USER = 512 * 1024
+export const CHATBOT_MAX_STORED_BYTES_PER_ORG = 5 * 1024 * 1024
+
 /** Maximum number of attachments a user can include in a single message. */
 export const CHATBOT_MAX_ATTACHMENTS_PER_MESSAGE = 5
 
@@ -22,7 +29,7 @@ export const CHATBOT_MAX_ATTACHMENTS_PER_MESSAGE = 5
 export const CHATBOT_MAX_MESSAGES = 50
 
 /** Maximum characters of attachment text injected into the model prompt. */
-export const CHATBOT_MAX_ATTACHMENT_CHARS = 40_000
+export const CHATBOT_MAX_ATTACHMENT_CHARS = CHATBOT_MAX_STORED_ATTACHMENT_CHARS
 
 /**
  * The scope determines what slice of organization data the assistant can read.
@@ -97,6 +104,12 @@ export interface ChatbotSource {
   /** Optional secondary line (e.g. "Senior Backend Engineer · Open"). */
   detail?: string
   /** Underlying entity ID (without the kind prefix), used to build deep links. */
+  entityId: string
+}
+
+/** Typed, non-PII reference persisted separately from chatbot message text. */
+export interface ChatbotEntityReference {
+  kind: ChatbotSourceKind
   entityId: string
 }
 

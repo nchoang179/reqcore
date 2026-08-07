@@ -25,7 +25,7 @@ import {
   scoringCriterion,
 } from '../../database/schema'
 import { downloadFromS3 } from '../s3'
-import { parseDocument } from '../resume-parser'
+import { parseDocumentIsolated } from '../resume-parser'
 import type { ChatbotScope } from '../../../shared/chatbot'
 import {
   CHATBOT_MAX_ATTACHMENT_CHARS,
@@ -35,6 +35,8 @@ import {
 export interface ChatbotToolContext {
   orgId: string
   scope: ChatbotScope
+  /** Verified job metadata when the conversation is restricted to one job. */
+  scopeJob?: { id: string, title: string }
   /** Attachments uploaded with the current user message. */
   attachments: Array<ChatbotAttachment & { text: string }>
 }
@@ -44,6 +46,41 @@ function assertJobInScope(scope: ChatbotScope, jobId: string) {
   if (scope.kind === 'job' && scope.jobId && scope.jobId !== jobId) {
     throw new Error(`Job ${jobId} is outside the active scope.`)
   }
+}
+
+function normalizeJobReference(value: string): string {
+  return value.normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
+/**
+ * Resolve the model's job argument without weakening the active scope.
+ *
+ * In a job-scoped conversation the model already has exactly one allowed job,
+ * so it may omit the argument or repeat the human-readable title shown in the
+ * prompt. Organization-scoped conversations must still supply a real job ID.
+ */
+export function resolveChatbotJobId(
+  ctx: Pick<ChatbotToolContext, 'scope' | 'scopeJob'>,
+  requestedJob?: string,
+): string {
+  if (ctx.scope.kind !== 'job') {
+    if (!requestedJob) throw new Error('A job ID is required in organization scope.')
+    return requestedJob
+  }
+
+  const activeJobId = ctx.scope.jobId
+  if (!activeJobId) throw new Error('The active job scope is missing a job ID.')
+  if (!requestedJob || requestedJob === activeJobId) return activeJobId
+
+  const activeJob = ctx.scopeJob
+  if (
+    activeJob?.id === activeJobId
+    && normalizeJobReference(requestedJob) === normalizeJobReference(activeJob.title)
+  ) {
+    return activeJobId
+  }
+
+  throw new Error(`Job ${requestedJob} is outside the active scope.`)
 }
 
 /** Build the org-scoped job filter, narrowed to the active scope when needed. */
@@ -66,6 +103,13 @@ export function buildChatbotTools(ctx: ChatbotToolContext) {
     eq(candidate.organizationId, ctx.orgId),
     isNull(candidate.quarantinedAt),
   ))
+  const requestedJobSchema = ctx.scope.kind === 'job'
+    ? z.string().min(1).optional().describe(
+        'Optional in job scope; omit to use the active job. If supplied, use its exact ID (not its title).',
+      )
+    : z.string().min(1).describe(
+        'The exact job ID returned by list_jobs. Do not pass a job title.',
+      )
 
   return {
     list_jobs: tool({
@@ -108,19 +152,19 @@ export function buildChatbotTools(ctx: ChatbotToolContext) {
       description:
         'Get full details for a single job, including description, salary, scoring criteria, and pipeline counts.',
       inputSchema: z.object({
-        jobId: z.string().min(1),
+        jobId: requestedJobSchema,
       }),
       execute: async ({ jobId }) => {
-        assertJobInScope(ctx.scope, jobId)
+        const resolvedJobId = resolveChatbotJobId(ctx, jobId)
         const j = await db.query.job.findFirst({
-          where: and(eq(job.organizationId, ctx.orgId), eq(job.id, jobId)),
+          where: and(eq(job.organizationId, ctx.orgId), eq(job.id, resolvedJobId)),
         })
-        if (!j) throw new Error(`Job ${jobId} not found.`)
+        if (!j) throw new Error(`Job ${resolvedJobId} not found.`)
 
         const criteria = await db.query.scoringCriterion.findMany({
           where: and(
             eq(scoringCriterion.organizationId, ctx.orgId),
-            eq(scoringCriterion.jobId, jobId),
+            eq(scoringCriterion.jobId, resolvedJobId),
           ),
           columns: { name: true, description: true, key: true },
         })
@@ -153,15 +197,15 @@ export function buildChatbotTools(ctx: ChatbotToolContext) {
         'Returns candidate name, email, application status, score, and ids — ' +
         'use get_candidate / read_resume for deeper analysis.',
       inputSchema: z.object({
-        jobId: z.string().min(1).describe('The job to list applications for.'),
+        jobId: requestedJobSchema,
         status: z.enum(['new', 'screening', 'interview', 'offer', 'hired', 'rejected']).optional(),
         limit: z.number().int().min(1).max(100).default(50),
       }),
       execute: async ({ jobId, status, limit }) => {
-        assertJobInScope(ctx.scope, jobId)
+        const resolvedJobId = resolveChatbotJobId(ctx, jobId)
         const conditions = [
           eq(application.organizationId, ctx.orgId),
-          eq(application.jobId, jobId),
+          eq(application.jobId, resolvedJobId),
           inArray(application.candidateId, activeCandidateIds),
         ]
         if (status) conditions.push(eq(application.status, status))
@@ -384,7 +428,9 @@ export function buildChatbotTools(ctx: ChatbotToolContext) {
 
         // Fall back to live parsing from S3.
         const buf = await downloadFromS3(doc.storageKey)
-        const re = await parseDocument(buf, doc.mimeType)
+        const re = await parseDocumentIsolated(buf, doc.mimeType, {
+          maxCharacters: CHATBOT_MAX_ATTACHMENT_CHARS,
+        })
         if (!re?.text) throw new Error('Document could not be parsed.')
         return {
           documentId: doc.id,
