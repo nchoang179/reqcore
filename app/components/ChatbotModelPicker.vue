@@ -226,12 +226,9 @@ onUnmounted(() => window.removeEventListener('click', onWindowClick))
               type="button"
               class="flex min-w-0 flex-1 items-start gap-2 py-2 pl-3 text-left cursor-pointer border-0 bg-transparent"
               :title="m.id"
+              :aria-pressed="selectedModelChoice?.id === m.id"
               @click="apply(PLATFORM_ENGINE_ID, m.id)"
             >
-              <Check
-                class="size-3.5 mt-0.5 shrink-0"
-                :class="selectedModelChoice?.id === m.id ? 'text-brand-500' : 'invisible'"
-              />
               <ChatbotVendorIcon
                 :vendor="m.vendor"
                 class="size-4 mt-0.5 shrink-0 text-surface-700 dark:text-surface-200"
@@ -239,6 +236,10 @@ onUnmounted(() => window.removeEventListener('click', onWindowClick))
               <div class="min-w-0 flex-1">
                 <div class="flex items-center gap-1.5">
                   <span class="truncate text-sm font-medium text-surface-800 dark:text-surface-100">{{ m.label }}</span>
+                  <Check
+                    v-if="selectedModelChoice?.id === m.id"
+                    class="size-3.5 shrink-0 text-brand-500"
+                  />
                   <span
                     class="inline-flex shrink-0 items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-semibold"
                     :class="m.intelligence !== null
