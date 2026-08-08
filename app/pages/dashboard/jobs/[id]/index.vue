@@ -1389,9 +1389,19 @@ onBeforeUnmount(() => {
   document.removeEventListener('click', handleOverviewDropdownClickOutside)
 })
 
+/**
+ * Only the very first load may swap the whole pipeline for a spinner. Later
+ * fetches — search, sort, filters, changing stage — keep the previous list on
+ * screen: tearing down the layout mid-request unmounts the search input and
+ * steals focus on every keystroke.
+ */
 const isLoading = computed(() => {
-  return jobFetchStatus.value === 'pending' || appFetchStatus.value === 'pending'
+  return (jobFetchStatus.value === 'pending' && !jobData.value)
+    || (appFetchStatus.value === 'pending' && !appData.value)
 })
+
+/** Background refetch of the candidate list — shown inline, never as a full-page state. */
+const isRefreshingApps = computed(() => appFetchStatus.value === 'pending' && !!appData.value)
 
 // ─────────────────────────────────────────────
 // Document preview
@@ -1445,7 +1455,7 @@ function closeDocPreview() {
 
     <!-- Error -->
     <div
-      v-else-if="jobError || appError"
+      v-else-if="(jobError && !jobData) || (appError && !appData)"
       class="m-6 rounded-xl border border-danger-200/80 bg-danger-50 p-5 text-sm text-danger-700 dark:border-danger-800/60 dark:bg-danger-950/40 dark:text-danger-300"
     >
       {{ jobError ? 'Job not found or failed to load.' : 'Failed to load applications.' }}
@@ -1680,11 +1690,17 @@ function closeDocPreview() {
 
           <!-- Count bar -->
           <div class="shrink-0 px-3.5 pb-2 flex items-center justify-between">
-            <span class="text-xs font-medium text-surface-500 dark:text-surface-400">
-              Showing {{ pageStart }}-{{ pageEnd }} of {{ focusedApplicationTotal }} candidate{{ focusedApplicationTotal === 1 ? '' : 's' }}
-              <span v-if="searchTerm.trim() || hasActiveFilters" class="text-surface-400 dark:text-surface-500">
-                {{ hasActiveFilters ? ' filtered' : ' matching' }}
+            <span class="flex min-w-0 items-center gap-1.5 text-xs font-medium text-surface-500 dark:text-surface-400">
+              <span class="truncate">
+                Showing {{ pageStart }}-{{ pageEnd }} of {{ focusedApplicationTotal }} candidate{{ focusedApplicationTotal === 1 ? '' : 's' }}
+                <span v-if="searchTerm.trim() || hasActiveFilters" class="text-surface-400 dark:text-surface-500">
+                  {{ hasActiveFilters ? ' filtered' : ' matching' }}
+                </span>
               </span>
+              <span
+                v-if="isRefreshingApps"
+                class="size-3 shrink-0 rounded-full border border-surface-300 border-t-brand-500 animate-spin dark:border-surface-600 dark:border-t-brand-400"
+              />
             </span>
             <div v-if="totalPages > 1" class="flex shrink-0 items-center gap-1">
               <button
@@ -1710,7 +1726,11 @@ function closeDocPreview() {
           </div>
 
           <!-- Scrollable list -->
-          <div ref="sidebarList" class="flex-1 overflow-y-auto scrollbar-thin border-t border-surface-100 dark:border-surface-800/60">
+          <div
+            ref="sidebarList"
+            class="flex-1 overflow-y-auto scrollbar-thin border-t border-surface-100 transition-opacity duration-150 dark:border-surface-800/60"
+            :class="isRefreshingApps ? 'opacity-60' : 'opacity-100'"
+          >
             <div v-if="filteredApplications.length === 0" class="p-8 text-center">
               <div class="flex size-12 items-center justify-center rounded-xl bg-surface-100 dark:bg-surface-800/60 mx-auto mb-3">
                 <UserRound class="size-5 text-surface-400 dark:text-surface-500" />
