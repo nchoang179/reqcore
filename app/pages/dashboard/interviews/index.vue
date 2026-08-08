@@ -43,6 +43,7 @@ const activeView = ref<'list' | 'calendar'>('list')
 
 const { interviews, total, status: fetchStatus, error, refresh, updateInterview, deleteInterviewById } = useInterviews({
   status: activeStatus,
+  order: 'scheduled_first',
   limit: 100,
 })
 

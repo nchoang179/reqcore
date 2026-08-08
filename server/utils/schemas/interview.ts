@@ -51,6 +51,7 @@ export const updateInterviewSchema = z.object({
 export const interviewQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20),
+  order: z.enum(['asc', 'desc', 'scheduled_first']).default('desc'),
   applicationId: z.string().uuid().optional(),
   jobId: z.string().uuid().optional(),
   status: z.enum(interviewStatuses).optional(),

@@ -23,7 +23,7 @@ function closeModal() {
         <div class="flex items-center justify-between border-b border-surface-200 px-5 py-4 dark:border-surface-800">
           <div class="flex items-center gap-2">
             <Eye class="size-5 text-brand-600 dark:text-brand-400" />
-            <h3 class="text-lg font-semibold text-surface-900 dark:text-surface-50">You're in the live demo</h3>
+            <h3 class="text-lg font-semibold text-surface-900 dark:text-surface-50">Create your own Reqcore workspace</h3>
           </div>
 
           <button
@@ -39,7 +39,7 @@ function closeModal() {
             <div class="rounded-lg border border-brand-100 bg-brand-50/70 p-4 dark:border-brand-900/70 dark:bg-brand-950/20">
               <div class="flex items-center gap-2 text-sm font-semibold text-brand-700 dark:text-brand-300">
                 <Sparkles class="size-4" />
-                Make it yours
+                You're exploring the live demo
               </div>
               <p class="mt-2 text-sm leading-6 text-surface-600 dark:text-surface-300">
                 {{ message }}
@@ -49,22 +49,22 @@ function closeModal() {
             <div class="space-y-2 text-xs text-surface-500 dark:text-surface-400">
               <div class="flex items-center gap-2">
                 <ShieldCheck class="size-4 text-emerald-500" />
-                Full read and write access
+                A private workspace for your data
               </div>
               <div class="flex items-center gap-2">
                 <ShieldCheck class="size-4 text-emerald-500" />
-                Your own workspace and team
+                Full editing access
               </div>
               <div class="flex items-center gap-2">
                 <ShieldCheck class="size-4 text-emerald-500" />
-                Checkout only after signup for paid plans
+                Invite your team when you're ready
               </div>
             </div>
           </div>
 
           <div>
             <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-surface-400 dark:text-surface-500">
-              Choose how to continue
+              Create your account
             </p>
             <DemoSignupOptions @select="closeModal" />
           </div>

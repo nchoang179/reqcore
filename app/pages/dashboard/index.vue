@@ -51,6 +51,7 @@ const { interviews: upcomingInterviews } = useInterviews({
   status: 'scheduled',
   from: today.toISOString(),
   to: weekFromToday.toISOString(),
+  order: 'asc',
   limit: 5,
 })
 

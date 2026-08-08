@@ -20,6 +20,13 @@ useSeoMeta({
 const { hasFeature } = usePlanFeature()
 const entitled = computed(() => hasFeature('chatbot'))
 
+const { data: session } = await authClient.useSession(useFetch)
+const config = useRuntimeConfig()
+const demoAccountEmail = (config.public.liveDemoEmail as string) || 'demo@reqcore.com'
+const isDemoAccount = computed(() => session.value?.user?.email === demoAccountEmail)
+const { openUpsell } = usePreviewReadOnly()
+const DEMO_CHAT_MESSAGE = 'Chat is read-only in the shared demo. Create your own account to start a private workspace and use the assistant with your own hiring data.'
+
 // The server owns the allowance; this shared billing meter lets the composer
 // warn before the last credits and become an upgrade path once they are spent.
 // Members can still read every existing conversation after the cap. Only a
@@ -151,7 +158,16 @@ function autoResize() {
 }
 watch(draft, () => nextTick(autoResize))
 
+function handleDemoChatAttempt(event?: Event): boolean {
+  if (!isDemoAccount.value) return false
+
+  event?.preventDefault()
+  openUpsell(DEMO_CHAT_MESSAGE)
+  return true
+}
+
 async function handleSubmit() {
+  if (handleDemoChatAttempt()) return
   if (isStreaming.value || chatbotQuotaExhausted.value) return
   const content = draft.value
   draft.value = ''
@@ -222,6 +238,7 @@ const suggestions = computed(() => {
 })
 
 function applySuggestion(s: string) {
+  if (handleDemoChatAttempt()) return
   draft.value = s
   nextTick(() => composerRef.value?.focus())
 }
@@ -664,6 +681,7 @@ async function startNew() {
                 rows="1"
                 placeholder="Ask Reqcore Assistant anything…"
                 class="block w-full resize-none border-0 bg-transparent px-4 pt-3 text-sm text-surface-900 dark:text-surface-100 placeholder:text-surface-400 focus:outline-none focus:ring-0"
+                @beforeinput="handleDemoChatAttempt"
                 @keydown="onKeyDown"
               />
 
