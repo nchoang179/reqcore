@@ -19,11 +19,11 @@
  *   2. `settleChatbotUsage` — reconcile that row to the real tokens, µ$ and
  *      credits once the stream finishes.
  *
- * A turn that produced nothing calls `releaseChatbotUsage` instead, which drops
- * the reservation entirely: the allowance should be spent on answers, not on our
- * failures.
+ * Paid turns that produce nothing release their reservation. A hosted Free
+ * prompt keeps its row once submitted because its allowance counts prompts,
+ * independent of token usage or whether the model completed an answer.
  */
-import { eq } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 import { aiUsageEvent } from '../../database/schema'
 import { estimatedTurnCredits } from './credits'
 
@@ -33,6 +33,15 @@ export interface ReserveChatbotUsageInput {
   provider: string
   model: string
   billingMode: 'platform' | 'byok'
+  /** Present only for hosted Free workspaces; makes the prompt claim atomic. */
+  promptLimit?: number
+}
+
+export class ChatbotPromptLimitReachedError extends Error {
+  constructor() {
+    super('Free assistant prompt limit reached.')
+    this.name = 'ChatbotPromptLimitReachedError'
+  }
 }
 
 export interface SettleChatbotUsageInput {
@@ -63,7 +72,41 @@ export async function reserveChatbotUsage(
   input: ReserveChatbotUsageInput,
 ): Promise<string | null> {
   const reserved = estimatedTurnCredits(input.model)
+  const promptLimit = input.promptLimit
   try {
+    if (promptLimit !== undefined) {
+      const rowId = await db.transaction(async (tx) => {
+        // Serialize claims for one org so simultaneous twentieth prompts cannot
+        // both observe 19 and pass. The ledger row itself is the prompt claim.
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`chatbot-prompts:${input.orgId}`}))`)
+        const [usage] = await tx
+          .select({ total: sql<string>`count(*)` })
+          .from(aiUsageEvent)
+          .where(and(
+            eq(aiUsageEvent.organizationId, input.orgId),
+            eq(aiUsageEvent.feature, 'chatbot_message'),
+          ))
+        if (Number(usage?.total ?? 0) >= promptLimit) {
+          throw new ChatbotPromptLimitReachedError()
+        }
+
+        const [row] = await tx.insert(aiUsageEvent).values({
+          organizationId: input.orgId,
+          userId: input.userId ?? null,
+          feature: 'chatbot_message',
+          provider: input.provider,
+          model: input.model,
+          billingMode: input.billingMode,
+          promptTokens: null,
+          completionTokens: null,
+          costUsdMicros: null,
+          creditsCharged: reserved,
+        }).returning({ id: aiUsageEvent.id })
+        return row?.id ?? null
+      })
+      return rowId
+    }
+
     const [row] = await db.insert(aiUsageEvent).values({
       organizationId: input.orgId,
       userId: input.userId ?? null,
@@ -79,11 +122,15 @@ export async function reserveChatbotUsage(
     return row?.id ?? null
   }
   catch (err) {
+    if (err instanceof ChatbotPromptLimitReachedError) throw err
     console.error(
-      `[Reqcore] failed to reserve assistant credits for org ${input.orgId} `
-      + `(${input.model}). This turn is invisible to the credit gate.`,
+      `[Reqcore] failed to reserve assistant usage for org ${input.orgId} `
+      + `(${input.model}). This turn is invisible to the allowance gate.`,
       err,
     )
+    // Free is count-capped. Proceeding without a row would make the prompt
+    // invisible and allow more than the advertised lifetime limit.
+    if (input.promptLimit !== undefined) throw err
     return null
   }
 }

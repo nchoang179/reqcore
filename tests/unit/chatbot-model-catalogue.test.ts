@@ -13,6 +13,7 @@ import {
   CHATBOT_MODEL_TIER_LABELS,
   CHATBOT_MODEL_VENDOR_LABELS,
   DEFAULT_CHATBOT_MODEL_ID,
+  FREE_PLAN_CHATBOT_MODEL_ID,
   blendedPricePer1m,
   chatbotModelChoices,
   creditMultiplier,
@@ -25,21 +26,19 @@ import {
 import { computeCostUsdMicros, getModelPrice } from '../../server/utils/ai/pricing'
 import { ESTIMATED_TURN_CREDITS, estimatedTurnCredits } from '../../server/utils/ai/credits'
 
-const VENDORS: ChatbotModelVendor[] = ['anthropic', 'openai', 'google', 'xai']
+const VENDORS: ChatbotModelVendor[] = ['anthropic', 'openai', 'google']
 const TIERS: ChatbotModelTier[] = ['expensive', 'medium', 'cheap']
 
 describe('catalogue shape', () => {
-  it('covers every tier for every vendor', () => {
-    // At least one, not exactly one: a vendor may list two models in a band
-    // while an older generation is still offered alongside its successor. What
-    // must never happen is a vendor with a missing price band, which would make
-    // "cheap" unreachable for that lab.
-    for (const vendor of VENDORS) {
-      for (const tier of TIERS) {
-        const matches = CHATBOT_MODELS.filter(m => m.vendor === vendor && m.tier === tier)
-        expect(matches.length, `${vendor}/${tier}`).toBeGreaterThanOrEqual(1)
-      }
-    }
+  it('offers only the supported catalogue vendors', () => {
+    expect([...new Set(CHATBOT_MODELS.map(m => m.vendor))]).toEqual(VENDORS)
+    expect(CHATBOT_MODELS.every(m => TIERS.includes(m.tier))).toBe(true)
+  })
+
+  it('does not offer retired Fable or Grok models', () => {
+    expect(findChatbotModel('anthropic/claude-fable-5')).toBeNull()
+    expect(CHATBOT_MODELS.some(m => m.id.includes('grok'))).toBe(false)
+    expect(CHATBOT_MODELS.some(m => m.vendor === 'xai')).toBe(false)
   })
 
   it('has no duplicate model ids', () => {
@@ -54,6 +53,27 @@ describe('catalogue shape', () => {
       tier: 'medium',
       inputPer1m: 1.5,
       outputPer1m: 7.5,
+    })
+  })
+
+  it('offers Claude Opus 5 with its OpenRouter price and Arena score', () => {
+    expect(findChatbotModel('anthropic/claude-opus-5')).toMatchObject({
+      label: 'Claude Opus 5',
+      vendor: 'anthropic',
+      tier: 'expensive',
+      arenaTextScore: 1493,
+      inputPer1m: 5,
+      outputPer1m: 25,
+    })
+  })
+
+  it('pins the Free plan to Gemini 3.5 Flash-Lite', () => {
+    expect(FREE_PLAN_CHATBOT_MODEL_ID).toBe('google/gemini-3.5-flash-lite')
+    expect(findChatbotModel(FREE_PLAN_CHATBOT_MODEL_ID)).toMatchObject({
+      label: 'Gemini 3.5 Flash-Lite',
+      arenaTextScore: 1459,
+      inputPer1m: 0.3,
+      outputPer1m: 2.5,
     })
   })
 
@@ -72,11 +92,17 @@ describe('catalogue shape', () => {
     for (const vendor of VENDORS) {
       const band = (tier: ChatbotModelTier) =>
         CHATBOT_MODELS.filter(m => m.vendor === vendor && m.tier === tier).map(blendedPricePer1m)
-      const cheap = band('cheap')
-      const medium = band('medium')
-      const expensive = band('expensive')
-      expect(Math.max(...cheap), `${vendor} cheap/medium`).toBeLessThan(Math.min(...medium))
-      expect(Math.max(...medium), `${vendor} medium/expensive`).toBeLessThanOrEqual(Math.min(...expensive))
+      const pricedBands = TIERS
+        .map(tier => ({ tier, prices: band(tier) }))
+        .filter(({ prices }) => prices.length > 0)
+      for (let i = 1; i < pricedBands.length; i++) {
+        const dearer = pricedBands[i - 1]!
+        const cheaper = pricedBands[i]!
+        expect(
+          Math.max(...cheaper.prices),
+          `${vendor} ${cheaper.tier}/${dearer.tier}`,
+        ).toBeLessThanOrEqual(Math.min(...dearer.prices))
+      }
     }
   })
 })
@@ -137,16 +163,14 @@ describe('creditMultiplier', () => {
 
 describe('intelligencePercentage', () => {
   it('anchors the supplied LM Arena text leader at 100%', () => {
-    const fable = findChatbotModel('anthropic/claude-fable-5')!
-    expect(fable.arenaTextScore).toBe(CHATBOT_ARENA_TEXT_LEADER_SCORE)
-    expect(intelligencePercentage(fable)).toBe(100)
+    expect(intelligencePercentage({ arenaTextScore: CHATBOT_ARENA_TEXT_LEADER_SCORE })).toBe(100)
   })
 
   it('normalizes the leader score\'s top 20% across the full percentage scale', () => {
     expect(CHATBOT_ARENA_TEXT_NORMALIZATION_RANGE).toBe(0.2)
     expect(intelligencePercentage(findChatbotModel('google/gemini-3.6-flash')!)).toBe(92.7)
     expect(intelligencePercentage(findChatbotModel('anthropic/claude-sonnet-5')!)).toBe(85.4)
-    expect(intelligencePercentage(findChatbotModel('x-ai/grok-4')!)).toBe(67.5)
+    expect(intelligencePercentage(findChatbotModel('openai/gpt-5.5')!)).toBe(90)
   })
 
   it('clamps scores outside the normalization window', () => {
@@ -157,8 +181,8 @@ describe('intelligencePercentage', () => {
     expect(intelligencePercentage({ arenaTextScore: CHATBOT_ARENA_TEXT_LEADER_SCORE + 100 })).toBe(100)
   })
 
-  it('does not assign a nearby model\'s score when no matching row was supplied', () => {
-    expect(intelligencePercentage(findChatbotModel('google/gemini-3.1-flash-lite')!)).toBeNull()
+  it('uses the supplied Free-model leaderboard score', () => {
+    expect(intelligencePercentage(findChatbotModel(FREE_PLAN_CHATBOT_MODEL_ID)!)).toBe(84.1)
   })
 
   it('exposes the derived value on picker choices', () => {
@@ -173,10 +197,10 @@ describe('estimatedTurnCredits', () => {
     // A flat reservation would let an expensive model's real cost land far above
     // what concurrent turns could see, which is the overdraw the reservation
     // exists to prevent.
-    const fable = findChatbotModel('anthropic/claude-fable-5')!
-    expect(estimatedTurnCredits(fable.id))
-      .toBe(Math.ceil(ESTIMATED_TURN_CREDITS * creditMultiplier(fable)))
-    expect(estimatedTurnCredits(fable.id)).toBeGreaterThan(estimatedTurnCredits(DEFAULT_CHATBOT_MODEL_ID))
+    const flagship = findChatbotModel('openai/gpt-5.5')!
+    expect(estimatedTurnCredits(flagship.id))
+      .toBe(Math.ceil(ESTIMATED_TURN_CREDITS * creditMultiplier(flagship)))
+    expect(estimatedTurnCredits(flagship.id)).toBeGreaterThan(estimatedTurnCredits(DEFAULT_CHATBOT_MODEL_ID))
   })
 
   it('falls back to the flat estimate for a BYOK or unknown model', () => {

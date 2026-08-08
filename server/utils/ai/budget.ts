@@ -5,8 +5,8 @@
  *
  *   • CV analysis  — metered in dollars (MONTHLY_BUDGET_USD), an internal cap
  *     the customer never sees a number for.
- *   • The assistant — metered in credits (see credits.ts), the customer-facing
- *     unit. Credits track real cost without disclosing it.
+ *   • The assistant — Free is a lifetime prompt count; paid plans are metered
+ *     in credits (see credits.ts), which track cost without disclosing it.
  *
  * They no longer share a pot. A cap spanning both meant heavy assistant use
  * silently starved an org's shortlist runs, and it forced one ceiling to serve
@@ -14,8 +14,8 @@
  *
  * Lines of defence before any platform-paid LLM call:
  *   1. Per-run output cap        — enforced via maxTokens in the provider call.
- *   2. Per-org ceiling           — dollars for analysis, credits for the
- *                                  assistant, both by plan tier.
+ *   2. Per-org ceiling           — dollars for analysis, prompts/credits for
+ *                                  the assistant, depending on plan tier.
  *   3. Global daily kill-switch  — one dollar cap across ALL orgs and BOTH
  *                                  surfaces; the runaway-loop insurance (a
  *                                  re-scoring bug, not normal use, is how you
@@ -37,7 +37,10 @@ import { aiUsageEvent, analysisRun } from '../../database/schema'
 import { getModelPrice, microsToUsd } from './pricing'
 import { chatbotCreditAllowance } from './credits'
 import { isBillingDisabled, resolveOrgPlanId } from '../billing/plan'
-import { FREE_PLAN_ANALYSIS_LIMIT } from '../../../shared/billing'
+import {
+  FREE_PLAN_ANALYSIS_LIMIT,
+  FREE_PLAN_CHATBOT_PROMPT_LIMIT,
+} from '../../../shared/billing'
 
 /**
  * Monthly platform-paid **analysis** budget per *paid* org, in USD, keyed by
@@ -84,19 +87,16 @@ function dailyCapUsd(): number {
 
 /**
  * `scope` reaches the client in the 429 payload, so the values are deliberately
- * coarse: every assistant refusal reports `org_chatbot_credits`, whether the org
- * ran out of a Free grant or a paid monthly allowance. A scope that told those
- * apart would let a customer infer where their plan's ceiling sits.
- *
- * The same applies to `message` — it is rendered verbatim in the chat UI
- * (useChatbot.ts). Never interpolate a dollar amount, a token count, or a raw
- * credit balance into one.
+ * The scope reaches the client. Free prompt exhaustion is intentionally
+ * distinct from a paid credit cap because the UI openly displays the Free
+ * plan's 20-prompt allowance. Paid credit balances remain private.
  */
 export class BudgetExceededError extends Error {
   constructor(
     public readonly scope:
       | 'org_monthly'
       | 'org_free_limit'
+      | 'org_chatbot_prompts'
       | 'org_chatbot_credits'
       | 'global_daily',
     message: string,
@@ -146,16 +146,7 @@ async function countPlatformRuns(orgId: string): Promise<number> {
 }
 
 /**
- * Sum the credits an org has spent on the assistant.
- *
- * Two shapes, because the two allowances mean different things:
- *
- *  - Free (`since` omitted, `platformOnly` false) — a lifetime grant, counted in
- *    *any* billing mode. It is a product boundary, not a cost control, so a turn
- *    spends the grant no matter who paid for it. Billing-disabled self-hosted
- *    instances bypass this SaaS quota entirely.
- *  - Paid (`since` = start of month, `platformOnly` true) — a cost control, so a
- *    BYOK turn on the org's own key must not consume it.
+ * Sum the credits a paid org has spent on platform assistant turns this month.
  *
  * Rows appear the moment a turn *starts*, carrying an estimated charge that is
  * reconciled when it ends (see usage.ts). That is what makes the gate safe under
@@ -178,6 +169,27 @@ async function sumChatbotCredits(
     .from(aiUsageEvent)
     .where(and(...filters))
   return Number(row?.total ?? 0)
+}
+
+/** Count assistant prompts claimed by a Free org over its lifetime. */
+async function countChatbotPrompts(orgId: string): Promise<number> {
+  const [row] = await db
+    .select({ total: sql<string>`count(*)` })
+    .from(aiUsageEvent)
+    .where(and(
+      eq(aiUsageEvent.organizationId, orgId),
+      eq(aiUsageEvent.feature, 'chatbot_message'),
+    ))
+  return Number(row?.total ?? 0)
+}
+
+/** Hosted Free prompt limit, with an ops override for controlled rollouts. */
+export function freeChatbotPromptLimit(): number {
+  const raw = process.env.AI_FREE_PLAN_CHATBOT_TURN_LIMIT
+  const parsed = raw ? Number(raw) : NaN
+  return Number.isFinite(parsed) && parsed > 0
+    ? Math.floor(parsed)
+    : FREE_PLAN_CHATBOT_PROMPT_LIMIT
 }
 
 /**
@@ -261,28 +273,34 @@ export type BudgetFeature = 'analysis' | 'chatbot'
 /**
  * How much of its assistant allowance an org has spent.
  *
- * The one place that knows whether a plan's grant is lifetime or monthly, and
- * whether BYOK turns count. Shared by the gate and by the usage meter
- * (billing/usage.ts) so the number shown always matches the number enforced.
+ * Shared by the paid-plan gate and usage meter. Free prompt usage is handled by
+ * getFreeChatbotPromptUsage instead.
  */
 export async function getChatbotCreditUsage(
   orgId: string,
   plan: string,
 ): Promise<{ used: number, allowance: number }> {
-  const isFree = plan === 'free'
   const used = await sumChatbotCredits(orgId, {
-    since: isFree ? undefined : startOfUtcMonth(),
-    platformOnly: !isFree,
+    since: startOfUtcMonth(),
+    platformOnly: true,
   })
   return { used, allowance: chatbotCreditAllowance(plan) }
+}
+
+/** Exact lifetime prompt usage for a hosted Free workspace. */
+export async function getFreeChatbotPromptUsage(
+  orgId: string,
+): Promise<{ used: number, allowance: number }> {
+  return {
+    used: await countChatbotPrompts(orgId),
+    allowance: freeChatbotPromptLimit(),
+  }
 }
 
 /**
  * Throw if an org has spent its assistant credit allowance.
  *
- * Free and paid share one refusal, one scope, and one message on purpose: the
- * customer sees "out of credits" either way, and cannot tell a lifetime grant
- * from a monthly allowance or read anything about where the ceiling sits.
+ * Raw balances never reach the customer; only a percentage is exposed.
  */
 async function assertChatbotCredits(orgId: string, plan: string): Promise<void> {
   const { used, allowance } = await getChatbotCreditUsage(orgId, plan)
@@ -290,9 +308,18 @@ async function assertChatbotCredits(orgId: string, plan: string): Promise<void> 
 
   throw new BudgetExceededError(
     'org_chatbot_credits',
-    plan === 'free'
-      ? 'You’ve used your free assistant credits. Upgrade to Solo to keep chatting with your pipeline — your conversations stay readable either way.'
-      : 'You’ve used this workspace’s assistant credits. They renew at the start of next month — or add your own AI key in Settings → AI to keep chatting without a limit.',
+    'You’ve used this workspace’s assistant credits. They renew at the start of next month — or add your own AI key in Settings → AI to keep chatting without a limit.',
+  )
+}
+
+/** Throw once a hosted Free workspace has submitted all of its prompts. */
+async function assertFreeChatbotPrompts(orgId: string): Promise<void> {
+  const { used, allowance } = await getFreeChatbotPromptUsage(orgId)
+  if (used < allowance) return
+
+  throw new BudgetExceededError(
+    'org_chatbot_prompts',
+    `You’ve used all ${allowance} free assistant prompts. Upgrade to Solo to keep chatting with your pipeline — your conversations stay readable either way.`,
   )
 }
 
@@ -308,8 +335,9 @@ async function assertChatbotCredits(orgId: string, plan: string): Promise<void> 
 export async function assertChatbotAllowance(
   orgId: string,
   billingMode: 'platform' | 'byok',
+  resolvedPlan?: string,
 ): Promise<void> {
-  const plan = await resolveOrgPlanId(orgId)
+  const plan = resolvedPlan ?? await resolveOrgPlanId(orgId)
   // The credit allowance is a SaaS product boundary. A billing-disabled
   // self-hosted instance is running on its own key and its own bill, so it gets
   // no allowance — only the daily kill-switch, which is a safety net rather than
@@ -318,7 +346,9 @@ export async function assertChatbotAllowance(
 
   if (billingMode === 'platform') {
     const [, daySpend] = await Promise.all([
-      allowanceApplies ? assertChatbotCredits(orgId, plan) : Promise.resolve(),
+      allowanceApplies
+        ? (plan === 'free' ? assertFreeChatbotPrompts(orgId) : assertChatbotCredits(orgId, plan))
+        : Promise.resolve(),
       sumPlatformSpendMicros(startOfUtcDay()),
     ])
     assertDailyCap(daySpend, 'chatbot')
@@ -326,7 +356,7 @@ export async function assertChatbotAllowance(
   }
 
   if (allowanceApplies && plan === 'free') {
-    await assertChatbotCredits(orgId, plan)
+    await assertFreeChatbotPrompts(orgId)
   }
 }
 

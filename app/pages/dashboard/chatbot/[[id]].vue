@@ -28,11 +28,12 @@ const { openUpsell } = usePreviewReadOnly()
 const DEMO_CHAT_MESSAGE = 'Chat is read-only in the shared demo. Create your own account to start a private workspace and use the assistant with your own hiring data.'
 
 // The server owns the allowance; this shared billing meter lets the composer
-// warn before the last credits and become an upgrade path once they are spent.
-// Members can still read every existing conversation after the cap. Only a
-// percentage is available here — see useChatbotQuota for why.
+// warn before the last prompts/credits and become an upgrade path at the cap.
+// Members can still read every existing conversation after the cap. Free uses
+// an exact prompt count; paid credit usage remains percentage-only.
 const {
   percentRemaining: chatbotPercentLeft,
+  promptsRemaining: chatbotPromptsLeft,
   exhausted: chatbotQuotaExhausted,
   nearLimit: chatbotQuotaNearLimit,
   isFree: chatbotOnFreePlan,
@@ -636,7 +637,9 @@ async function startNew() {
               <p class="flex items-center gap-2">
                 <AlertCircle class="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
                 <span>
-                  <strong>About {{ chatbotPercentLeft }}% of your assistant credits left.</strong>
+                  <strong>{{ chatbotOnFreePlan
+                    ? `${chatbotPromptsLeft} free assistant prompts left.`
+                    : `About ${chatbotPercentLeft}% of your assistant credits left.` }}</strong>
                   {{ chatbotOnFreePlan
                     ? 'Upgrade to keep chatting without losing your flow.'
                     : 'They renew next month, or connect your own AI key for unlimited messages.' }}

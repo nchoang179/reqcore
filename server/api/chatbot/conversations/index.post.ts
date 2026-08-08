@@ -2,13 +2,17 @@ import { and, eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { aiConfig, chatbotAgent, chatbotConversation, chatbotFolder, job } from '../../../database/schema'
 import { requireChatbotAccess } from '../../../utils/chatbotAccess'
+import { isBillingDisabled, resolveOrgPlanId } from '../../../utils/billing/plan'
 import {
   isPlatformEngineId,
   platformPinUpdate,
   toConversationSummary,
 } from '../../../utils/chatbotConversation'
-import type { ChatbotConversationSummary } from '../../../../shared/chatbot'
-import { isChatbotCatalogueModel } from '../../../../shared/chatbot-models'
+import { PLATFORM_ENGINE_ID, type ChatbotConversationSummary } from '../../../../shared/chatbot'
+import {
+  FREE_PLAN_CHATBOT_MODEL_ID,
+  isChatbotCatalogueModel,
+} from '../../../../shared/chatbot-models'
 
 const bodySchema = z.object({
   title: z.string().min(1).max(120).trim().optional(),
@@ -36,6 +40,14 @@ export default defineEventHandler(async (event): Promise<{ conversation: Chatbot
   const userId = session.user.id
 
   const body = await readValidatedBody(event, bodySchema.parse)
+  const plan = await resolveOrgPlanId(orgId)
+  const freePlanRestrictionsApply = !isBillingDisabled() && plan === 'free'
+  const effectiveAiConfigId = freePlanRestrictionsApply
+    ? PLATFORM_ENGINE_ID
+    : body.aiConfigId ?? null
+  const effectiveModel = freePlanRestrictionsApply
+    ? FREE_PLAN_CHATBOT_MODEL_ID
+    : body.model ?? null
 
   // Validate folder ownership.
   if (body.folderId) {
@@ -66,9 +78,9 @@ export default defineEventHandler(async (event): Promise<{ conversation: Chatbot
   // Validate AI config ownership. The platform engine is not an ai_config row,
   // so it skips this check — access to it is decided by canUsePlatformAi at
   // send time, not by org ownership of a config.
-  if (body.aiConfigId && !isPlatformEngineId(body.aiConfigId)) {
+  if (effectiveAiConfigId && !isPlatformEngineId(effectiveAiConfigId)) {
     const c = await db.query.aiConfig.findFirst({
-      where: and(eq(aiConfig.id, body.aiConfigId), eq(aiConfig.organizationId, orgId)),
+      where: and(eq(aiConfig.id, effectiveAiConfigId), eq(aiConfig.organizationId, orgId)),
       columns: { id: true },
     })
     if (!c) throw createError({ statusCode: 404, statusMessage: 'AI configuration not found.' })
@@ -91,10 +103,10 @@ export default defineEventHandler(async (event): Promise<{ conversation: Chatbot
     userId,
     folderId: body.folderId ?? null,
     agentId: body.agentId ?? null,
-    ...platformPinUpdate(body.aiConfigId ?? null),
+    ...platformPinUpdate(effectiveAiConfigId),
     // A catalogue model is meaningful only on the platform engine. Normalise
     // inconsistent clients instead of storing a hidden model beside BYOK.
-    chatbotModel: isPlatformEngineId(body.aiConfigId) ? body.model ?? null : null,
+    chatbotModel: isPlatformEngineId(effectiveAiConfigId) ? effectiveModel : null,
     title: body.title ?? 'New chat',
     scope: body.scope,
     thinking: body.thinking === true,

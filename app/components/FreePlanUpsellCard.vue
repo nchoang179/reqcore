@@ -98,18 +98,18 @@ const recommended = getBillingPlan('solo')!
         </UsageMeterBar>
 
         <UsageMeterBar
-          label="Assistant credits"
+          label="Assistant prompts"
           :icon="MessageCircle"
           :used="aiAssistant.used"
           :limit="aiAssistant.limit"
-          :value-label="`${aiAssistant.used}% used`"
+          :value-label="`${aiAssistant.used} / ${aiAssistant.limit} used`"
         >
           <template #default="{ tone }">
             <p v-if="tone === 'full'" class="mt-1.5 text-xs text-danger-600 dark:text-danger-400">
-              You've used your free assistant credits. Upgrade to keep chatting — your conversations stay readable.
+              You've used all 20 free assistant prompts. Upgrade to keep chatting — your conversations stay readable.
             </p>
             <p v-else class="mt-1.5 text-xs text-surface-400 dark:text-surface-500">
-              Free orgs get a one-off grant of assistant credits. Paid plans renew monthly, or run on your own key.
+              Every prompt counts once, regardless of length or model usage.
             </p>
           </template>
         </UsageMeterBar>

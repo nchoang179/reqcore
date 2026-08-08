@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * Composer replacement for workspaces that have spent their assistant credit
+ * Composer replacement for workspaces that have exhausted their assistant
  * allowance. Conversation history remains readable either way.
  *
  * Two audiences, two exits:
@@ -10,9 +10,8 @@
  *    key lifts the limit immediately, which is also the outcome that costs us
  *    nothing to serve.
  *
- * Deliberately quotes no credit figure. The allowance is expressed to customers
- * only as a percentage (see useChatbotQuota), and a raw number here would be a
- * back door to the per-turn cost it is meant to keep private.
+ * Free's public prompt count can be quoted directly. Paid credit balances stay
+ * private and are surfaced only as a percentage (see useChatbotQuota).
  */
 import { ArrowRight, Bot, Check, CreditCard, KeyRound, Sparkles } from 'lucide-vue-next'
 import { getBillingPlan } from '~~/shared/billing'
@@ -57,13 +56,13 @@ const aiSettingsTarget = computed(() => localePath('/dashboard/settings/ai'))
         <div class="min-w-0">
           <div class="mb-1.5 inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-brand-700 dark:bg-brand-950/50 dark:text-brand-300">
             <Sparkles class="size-3" />
-            Assistant credits used
+            {{ onFreePlan ? 'Free prompts used' : 'Assistant credits used' }}
           </div>
           <h2 id="chatbot-quota-heading" class="text-lg font-semibold tracking-tight text-surface-950 dark:text-white">
             {{ onFreePlan ? 'Keep the conversation going with Solo' : 'Connect your own AI key to keep going' }}
           </h2>
           <p v-if="onFreePlan" class="mt-1 max-w-xl text-sm leading-relaxed text-surface-600 dark:text-surface-300">
-            Your workspace has used its free assistant credits. Your conversations are safe and stay readable.
+            Your workspace has used all 20 free assistant prompts. Your conversations are safe and stay readable.
             Solo adds a monthly Reqcore AI allowance, or you can connect your own AI key.
           </p>
           <p v-else class="mt-1 max-w-xl text-sm leading-relaxed text-surface-600 dark:text-surface-300">

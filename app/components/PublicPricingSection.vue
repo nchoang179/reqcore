@@ -7,7 +7,7 @@ import {
 } from 'lucide-vue-next'
 import {
   BILLING_PLANS,
-  FREE_PLAN_CHATBOT_APPROX_MESSAGES,
+  FREE_PLAN_CHATBOT_PROMPT_LIMIT,
   type BillingPlan,
   type BillingPlanId,
 } from '~~/shared/billing'
@@ -148,7 +148,7 @@ const plans = computed<PlanCard[]>(() => [
       'Unlimited team members',
       'AI shortlist ranking',
       'Your first AI shortlist free, no card',
-      `About ${FREE_PLAN_CHATBOT_APPROX_MESSAGES} AI assistant messages to try it on your own pipeline`,
+      `${FREE_PLAN_CHATBOT_PROMPT_LIMIT} AI assistant prompts to try on your own pipeline`,
       'Branded application forms',
       'Resume parsing and candidate profiles',
       '5 candidate conversations, unlimited replies',

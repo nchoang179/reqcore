@@ -59,10 +59,8 @@ export function estimatedTurnCredits(model: string): number {
 }
 
 /**
- * Monthly assistant credits for a *paid* org, by plan. Free orgs get a lifetime
- * grant instead (FREE_PLAN_CHATBOT_CREDITS) — same reasoning as the analysis
- * gate: a monthly reset teaches people to wait, a lifetime grant asks them to
- * decide.
+ * Monthly assistant credits for paid orgs, by plan. Free orgs do not use this
+ * meter; they have an exact lifetime prompt count in budget.ts.
  *
  * These are roughly half of each plan's old shared MONTHLY_BUDGET_USD, so
  * splitting the assistant out into its own budget did not quietly double total
@@ -77,16 +75,8 @@ export const MONTHLY_CHATBOT_CREDITS: Record<string, number> = {
   agency: 125_000,
 }
 
-/** Lifetime assistant credits for a free org. */
-export const FREE_PLAN_CHATBOT_CREDITS = 400
-
-/** Resolve a plan's credit allowance, with an env override for ops. */
+/** Resolve a paid plan's credit allowance. */
 export function chatbotCreditAllowance(plan: string): number {
-  if (plan === 'free') {
-    const raw = process.env.AI_FREE_PLAN_CHATBOT_CREDITS
-    const parsed = raw ? Number(raw) : NaN
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : FREE_PLAN_CHATBOT_CREDITS
-  }
   return MONTHLY_CHATBOT_CREDITS[plan] ?? MONTHLY_CHATBOT_CREDITS.default!
 }
 

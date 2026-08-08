@@ -10,8 +10,6 @@ import {
   chatbotCreditAllowance,
   creditPercentUsed,
   creditsForMicros,
-  ESTIMATED_TURN_CREDITS,
-  FREE_PLAN_CHATBOT_CREDITS,
   MONTHLY_CHATBOT_CREDITS,
 } from '../../server/utils/ai/credits'
 import { BILLING_PLANS } from '../../shared/billing'
@@ -78,14 +76,7 @@ describe('chatbotCreditAllowance', () => {
     expect(chatbotCreditAllowance('not-a-plan')).toBe(MONTHLY_CHATBOT_CREDITS.default)
   })
 
-  it('gives free orgs less than any paid plan', () => {
-    expect(chatbotCreditAllowance('free')).toBe(FREE_PLAN_CHATBOT_CREDITS)
-    expect(FREE_PLAN_CHATBOT_CREDITS).toBeLessThan(MONTHLY_CHATBOT_CREDITS.solo!)
-  })
-
-  it('leaves room for more than a couple of turns on the free grant', () => {
-    // A grant that only buys one or two questions reads as a broken demo rather
-    // than a capped feature.
-    expect(FREE_PLAN_CHATBOT_CREDITS / ESTIMATED_TURN_CREDITS).toBeGreaterThan(5)
+  it('does not define a token-priced Free allowance', () => {
+    expect(chatbotCreditAllowance('free')).toBe(MONTHLY_CHATBOT_CREDITS.default)
   })
 })

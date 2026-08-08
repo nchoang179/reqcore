@@ -2,10 +2,11 @@
  * The assistant's selectable model catalogue — one vetted list, shared by the
  * server (pricing, validation) and the composer's picker (labels, multipliers).
  *
- * Scope is deliberately narrow: four frontier labs (Anthropic, OpenAI, Google,
- * xAI), three tiers each. Every entry is reachable through OpenRouter on the
- * platform key, so this list is *only* meaningful for platform-paid turns. A
- * BYOK config brings its own model id and never consults this file.
+ * Scope is deliberately narrow: three frontier labs (Anthropic, OpenAI, and
+ * Google), with a small set of vetted tiers. Every entry is reachable through
+ * OpenRouter on the platform key, so this list is *only* meaningful for
+ * platform-paid turns. A BYOK config brings its own model id and never consults
+ * this file.
  *
  * ## Why the prices live here and not only in `MODEL_PRICING`
  *
@@ -85,21 +86,22 @@ export const CHATBOT_MODEL_TIER_LABELS: Record<ChatbotModelTier, string> = {
 export const CHATBOT_MODELS: readonly ChatbotModelOption[] = [
   // ── Anthropic ──
   {
-    id: 'anthropic/claude-fable-5',
+    id: 'anthropic/claude-opus-5',
     vendor: 'anthropic',
     tier: 'expensive',
-    label: 'Claude Fable 5',
-    description: 'Deepest reasoning for hard shortlisting calls and long documents.',
-    inputPer1m: 10.0,
-    outputPer1m: 50.0,
-    arenaTextScore: 1507,
+    label: 'Claude Opus 5',
+    description: 'Anthropic\'s flagship for the hardest analysis and long-horizon work.',
+    inputPer1m: 5.0,
+    outputPer1m: 25.0,
+    // LM Arena reports this score for the claude-opus-5-high variant.
+    arenaTextScore: 1493,
   },
   {
     id: 'anthropic/claude-sonnet-5',
     vendor: 'anthropic',
     tier: 'medium',
     label: 'Claude Sonnet 5',
-    description: 'Strong analysis at a fraction of Fable\'s cost. A safe default.',
+    description: 'Strong analysis for demanding shortlisting calls and long documents.',
     inputPer1m: 2.0,
     outputPer1m: 10.0,
     arenaTextScore: 1463,
@@ -179,45 +181,14 @@ export const CHATBOT_MODELS: readonly ChatbotModelOption[] = [
     arenaTextScore: 1476,
   },
   {
-    id: 'google/gemini-3.1-flash-lite',
+    id: 'google/gemini-3.5-flash-lite',
     vendor: 'google',
     tier: 'cheap',
-    label: 'Gemini 3.1 Flash-Lite',
-    description: 'The cheapest option here — ideal for quick, high-volume questions.',
-    inputPer1m: 0.25,
-    outputPer1m: 1.5,
-  },
-
-  // ── xAI ──
-  {
-    id: 'x-ai/grok-4.1',
-    vendor: 'xai',
-    tier: 'expensive',
-    label: 'Grok 4.1',
-    description: 'xAI\'s frontier model for demanding analysis and long conversations.',
-    inputPer1m: 5.0,
-    outputPer1m: 25.0,
-    arenaTextScore: 1466,
-  },
-  {
-    id: 'x-ai/grok-4',
-    vendor: 'xai',
-    tier: 'medium',
-    label: 'Grok 4',
-    description: 'Well-rounded Grok model for day-to-day recruiting questions.',
-    inputPer1m: 3.0,
-    outputPer1m: 15.0,
-    arenaTextScore: 1409,
-  },
-  {
-    id: 'x-ai/grok-4.1-fast',
-    vendor: 'xai',
-    tier: 'cheap',
-    label: 'Grok 4.1 Fast',
-    description: 'Low-latency Grok for short questions and quick summaries.',
-    inputPer1m: 0.5,
+    label: 'Gemini 3.5 Flash-Lite',
+    description: 'Fast, cost-efficient answers for focused questions and document lookups.',
+    inputPer1m: 0.3,
     outputPer1m: 2.5,
-    arenaTextScore: 1431,
+    arenaTextScore: 1459,
   },
 ]
 
@@ -227,6 +198,9 @@ export const CHATBOT_MODELS: readonly ChatbotModelOption[] = [
  * change it deliberately.
  */
 export const DEFAULT_CHATBOT_MODEL_ID = 'google/gemini-3.6-flash'
+
+/** The only platform model available to hosted Free-plan workspaces. */
+export const FREE_PLAN_CHATBOT_MODEL_ID = 'google/gemini-3.5-flash-lite'
 
 /**
  * Input:output token ratio assumed when collapsing a two-number price into the

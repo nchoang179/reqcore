@@ -7,10 +7,8 @@
  * credit is spent and swap the composer for an upsell once it is, instead of
  * letting the user type into a box that will only ever return a 429.
  *
- * Everything here is a **percentage**. The server deliberately never sends a raw
- * credit balance or token count, because those disclose what a turn costs to
- * run; a percentage tells the customer what they need to know and nothing else.
- * Don't reintroduce an absolute number in this file.
+ * Free usage is an exact prompt count. Paid usage remains a percentage because
+ * the server deliberately never sends a raw credit balance or token count.
  *
  * `percentUsed` is null on a billing-disabled self-hosted instance — every
  * consumer must treat that as "uncapped", not "nothing left".
@@ -32,10 +30,26 @@ export function useChatbotQuota() {
     return value?.enabled ? value.usage : null
   })
 
+  const isFree = computed(() => usage.value?.tier === 'free')
+  const used = computed(() => usage.value?.aiAssistant?.used ?? null)
+  const limit = computed(() => usage.value?.aiAssistant?.limit ?? null)
+
+  /** Exact remaining prompts on Free; null for paid/uncapped workspaces. */
+  const promptsRemaining = computed<number | null>(() => {
+    if (!isFree.value || used.value == null || limit.value == null) return null
+    return Math.max(0, limit.value - used.value)
+  })
+
   /** Percent of the allowance spent, or null when this org isn't capped. */
   const percentUsed = computed<number | null>(() => {
-    const used = usage.value?.aiAssistant?.used
-    return typeof used === 'number' && Number.isFinite(used) ? used : null
+    const current = used.value
+    const cap = limit.value
+    if (typeof current !== 'number' || !Number.isFinite(current)) return null
+    if (isFree.value) {
+      if (typeof cap !== 'number' || !Number.isFinite(cap) || cap <= 0) return null
+      return Math.min(100, Math.max(0, Math.round((current / cap) * 100)))
+    }
+    return current
   })
 
   /** Percent of the allowance still available, or null when uncapped. */
@@ -56,7 +70,15 @@ export function useChatbotQuota() {
    * Free orgs get the upgrade path; paid orgs that run out are offered BYOK,
    * which is uncapped and costs us nothing to serve.
    */
-  const isFree = computed(() => usage.value?.tier === 'free')
-
-  return { percentUsed, percentRemaining, exhausted, nearLimit, isFree, refresh }
+  return {
+    used,
+    limit,
+    promptsRemaining,
+    percentUsed,
+    percentRemaining,
+    exhausted,
+    nearLimit,
+    isFree,
+    refresh,
+  }
 }

@@ -5,21 +5,23 @@
  * Both meters mirror gates enforced elsewhere:
  *  - activeRoles  → assertActiveRoleLimit (server/utils/billing/plan.ts)
  *  - aiAnalysis   → assertPlatformBudget free-tier count gate (server/utils/ai/budget.ts)
- *  - aiAssistant  → assertChatbotAllowance credit gate (same file)
+ *  - aiAssistant  → assertChatbotAllowance prompt/credit gate (same file)
  *
  * `limit: null` means "no fixed cap on this tier" (e.g. paid analysis is a $
  * budget, agency roles are unlimited) and is JSON-safe, unlike Infinity.
  *
- * `aiAssistant` is the exception to the "used / limit" shape: it reports a
- * **percentage** (used 0–100 against a limit of 100) on every tier, not a raw
- * credit balance. A percentage is invariant to the µ$-per-credit rate, so it
- * tells the customer how much room is left without disclosing what a turn costs
- * us. Raw credit figures must not leave the server — see ai/credits.ts.
+ * `aiAssistant` reports the exact prompt count on Free, where the public limit
+ * is count-based. Paid tiers still report only a credit percentage, keeping raw
+ * balances and the credit-to-cost rate private.
  */
 import { and, eq, ne, sql } from 'drizzle-orm'
 import { analysisRun, candidateMessage, job } from '../../database/schema'
 import { resolveOrgPlanId } from './plan'
-import { freeRunLimit, getChatbotCreditUsage } from '../ai/budget'
+import {
+  freeRunLimit,
+  getChatbotCreditUsage,
+  getFreeChatbotPromptUsage,
+} from '../ai/budget'
 import { creditPercentUsed } from '../ai/credits'
 import {
   activeRoleLimitForTier,
@@ -94,10 +96,12 @@ async function countStartedConversations(orgId: string): Promise<number> {
 export async function getOrgUsage(orgId: string): Promise<OrgUsage> {
   const tier = await resolveOrgPlanId(orgId)
 
-  const [openJobs, aiRuns, assistantCredits, conversations] = await Promise.all([
+  const [openJobs, aiRuns, assistantUsage, conversations] = await Promise.all([
     countOpenJobs(orgId),
     countPlatformRuns(orgId),
-    getChatbotCreditUsage(orgId, tier),
+    tier === 'free'
+      ? getFreeChatbotPromptUsage(orgId)
+      : getChatbotCreditUsage(orgId, tier),
     countStartedConversations(orgId),
   ])
 
@@ -113,11 +117,13 @@ export async function getOrgUsage(orgId: string): Promise<OrgUsage> {
       used: aiRuns,
       limit: tier === 'free' ? freeRunLimit() : null,
     },
-    // Percentage of the credit allowance consumed, never the credits themselves.
-    aiAssistant: {
-      used: creditPercentUsed(assistantCredits.used, assistantCredits.allowance),
-      limit: 100,
-    },
+    aiAssistant: tier === 'free'
+      ? { used: assistantUsage.used, limit: assistantUsage.allowance }
+      : {
+          // Percentage of a paid credit allowance, never its raw balance.
+          used: creditPercentUsed(assistantUsage.used, assistantUsage.allowance),
+          limit: 100,
+        },
     candidateConversations: {
       used: conversations,
       limit: tier === 'free' ? FREE_PLAN_CANDIDATE_CONVERSATION_LIMIT : null,

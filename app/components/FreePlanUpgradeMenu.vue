@@ -77,11 +77,11 @@ watch(() => route.path, () => { open.value = false })
           <UsageMeterBar label="Active roles" :icon="Briefcase" :used="usage.activeRoles.used" :limit="usage.activeRoles.limit" />
           <UsageMeterBar label="AI shortlist runs" :icon="Zap" :used="usage.aiAnalysis.used" :limit="usage.aiAnalysis.limit" />
           <UsageMeterBar
-            label="Assistant credits"
+            label="Assistant prompts"
             :icon="MessageCircle"
             :used="usage.aiAssistant.used"
             :limit="usage.aiAssistant.limit"
-            :value-label="`${usage.aiAssistant.used}% used`"
+            :value-label="`${usage.aiAssistant.used} / ${usage.aiAssistant.limit} used`"
           />
           <UsageMeterBar label="Candidate conversations" :icon="MessageSquare" :used="usage.candidateConversations.used" :limit="usage.candidateConversations.limit" />
         </div>

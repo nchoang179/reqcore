@@ -21,13 +21,16 @@ import {
   assertPricedModel,
   BudgetExceededError,
   budgetErrorToHttp,
+  freeChatbotPromptLimit,
 } from '../../utils/ai/budget'
 import { creditsForMicros } from '../../utils/ai/credits'
 import {
+  ChatbotPromptLimitReachedError,
   releaseChatbotUsage,
   reserveChatbotUsage,
   settleChatbotUsage,
 } from '../../utils/ai/usage'
+import { isBillingDisabled, resolveOrgPlanId } from '../../utils/billing/plan'
 import { platformPinUpdate } from '../../utils/chatbotConversation'
 import { buildChatbotTools } from '../../utils/ai/chatTools'
 import { getChatbotAttachments } from '../../utils/chatbotAttachments'
@@ -45,7 +48,10 @@ import {
   type ChatbotStreamEvent,
   type ChatbotToolCall,
 } from '../../../shared/chatbot'
-import { isChatbotCatalogueModel } from '../../../shared/chatbot-models'
+import {
+  FREE_PLAN_CHATBOT_MODEL_ID,
+  isChatbotCatalogueModel,
+} from '../../../shared/chatbot-models'
 
 /**
  * POST /api/chatbot/chat
@@ -182,6 +188,8 @@ export default defineEventHandler(async (event) => {
   await limiter(event)
   const session = await requireChatbotAccess(event)
   const orgId = session.session.activeOrganizationId
+  const plan = await resolveOrgPlanId(orgId)
+  const freePlanRestrictionsApply = !isBillingDisabled() && plan === 'free'
 
   const body = await readValidatedBody(event, bodySchema.parse)
 
@@ -203,14 +211,16 @@ export default defineEventHandler(async (event) => {
   const conversationPin = conversation.usePlatformAi
     ? PLATFORM_AI_CONFIG_ID
     : conversation.aiConfigId
-  const preferredAiConfigId =
-    body.aiConfigId !== undefined ? body.aiConfigId : conversationPin
+  const preferredAiConfigId = freePlanRestrictionsApply
+    ? PLATFORM_AI_CONFIG_ID
+    : body.aiConfigId !== undefined ? body.aiConfigId : conversationPin
 
   // The model pin follows the same override → conversation → default ladder.
   // It only reaches the platform engine; `resolveChatbotProvider` drops it on a
   // BYOK path, where the org's own config decides the model.
-  const preferredModel =
-    body.model !== undefined ? body.model : conversation.chatbotModel
+  const preferredModel = freePlanRestrictionsApply
+    ? FREE_PLAN_CHATBOT_MODEL_ID
+    : body.model !== undefined ? body.model : conversation.chatbotModel
 
   const resolved = await resolveChatbotProvider(orgId, {
     preferId: preferredAiConfigId,
@@ -228,7 +238,7 @@ export default defineEventHandler(async (event) => {
   // than a dead stream. Covers the org's assistant credit allowance and the
   // global daily kill-switch.
   try {
-    await assertChatbotAllowance(orgId, resolved.billingMode)
+    await assertChatbotAllowance(orgId, resolved.billingMode, plan)
   }
   catch (err) {
     if (err instanceof BudgetExceededError) throw budgetErrorToHttp(err)
@@ -301,15 +311,48 @@ export default defineEventHandler(async (event) => {
     textLength: a.textLength,
   }))
 
+  // The usage row is also the Free plan's prompt claim. Claim before persisting
+  // the user message so a rejected twenty-first prompt leaves no orphaned chat
+  // message. Free claims are serialized in reserveChatbotUsage, closing the
+  // concurrency gap between the allowance check above and this insert.
+  let usageRowId: string | null
+  const promptLimit = freePlanRestrictionsApply ? freeChatbotPromptLimit() : undefined
+  try {
+    usageRowId = await reserveChatbotUsage({
+      orgId,
+      userId: session.user.id,
+      provider: resolved.provider,
+      model: resolved.model,
+      billingMode: resolved.billingMode,
+      ...(promptLimit !== undefined ? { promptLimit } : {}),
+    })
+  }
+  catch (err) {
+    if (err instanceof ChatbotPromptLimitReachedError) {
+      throw budgetErrorToHttp(new BudgetExceededError(
+        'org_chatbot_prompts',
+        `You’ve used all ${promptLimit ?? 20} free assistant prompts. Upgrade to Solo to keep chatting with your pipeline — your conversations stay readable either way.`,
+      ))
+    }
+    throw err
+  }
+
   // ── Persist the user message ──
-  const [persistedUser] = await db.insert(chatbotMessage).values({
-    conversationId: conversation.id,
-    organizationId: orgId,
-    userId: session.user.id,
-    role: 'user',
-    content: lastUser.content,
-    attachments: userAttachmentSnapshot.length ? userAttachmentSnapshot : null,
-  }).returning({ id: chatbotMessage.id, createdAt: chatbotMessage.createdAt })
+  let persistedUser: { id: string, createdAt: Date } | undefined
+  try {
+    [persistedUser] = await db.insert(chatbotMessage).values({
+      conversationId: conversation.id,
+      organizationId: orgId,
+      userId: session.user.id,
+      role: 'user',
+      content: lastUser.content,
+      attachments: userAttachmentSnapshot.length ? userAttachmentSnapshot : null,
+    }).returning({ id: chatbotMessage.id, createdAt: chatbotMessage.createdAt })
+  }
+  catch (err) {
+    if (usageRowId) await releaseChatbotUsage(usageRowId)
+    throw err
+  }
 
   // ── Patch conversation metadata. Auto-title on the first user message. ──
   const isFirstMessage = !conversation.lastMessageAt
@@ -332,6 +375,10 @@ export default defineEventHandler(async (event) => {
   // stale selection if it later moves back to Reqcore AI.
   if (body.aiConfigId !== undefined && body.aiConfigId !== PLATFORM_AI_CONFIG_ID) {
     conversationUpdates.chatbotModel = null
+  }
+  if (freePlanRestrictionsApply) {
+    Object.assign(conversationUpdates, platformPinUpdate(PLATFORM_AI_CONFIG_ID))
+    conversationUpdates.chatbotModel = FREE_PLAN_CHATBOT_MODEL_ID
   }
   if (body.scope) conversationUpdates.scope = body.scope
   if (isFirstMessage && conversation.title === 'New chat') {
@@ -368,19 +415,6 @@ export default defineEventHandler(async (event) => {
     'Cache-Control': 'no-cache, no-transform',
     'Connection': 'keep-alive',
     'X-Accel-Buffering': 'no',
-  })
-
-  // Claim an estimated charge against the allowance *before* the turn runs, so
-  // concurrent turns can see it. The gate above is pre-spend: without a
-  // reservation, N simultaneous requests all read the same balance and every one
-  // of them passes a check that only had room for one. Reconciled to the real
-  // cost in the `finally` below.
-  const usageRowId = await reserveChatbotUsage({
-    orgId,
-    userId: session.user.id,
-    provider: resolved.provider,
-    model: resolved.model,
-    billingMode: resolved.billingMode,
   })
 
   const startedAt = Date.now()
@@ -634,7 +668,7 @@ export default defineEventHandler(async (event) => {
                 : null,
             })
           }
-          else {
+          else if (!freePlanRestrictionsApply) {
             await releaseChatbotUsage(usageRowId)
           }
         }

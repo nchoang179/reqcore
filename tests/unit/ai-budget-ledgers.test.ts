@@ -2,7 +2,7 @@
  * The two AI surfaces are metered in different units against different ledgers,
  * and getting that wiring wrong costs real money quietly. These tests pin:
  *
- *  - the assistant is metered in **credits** (aiUsageEvent.credits_charged),
+ *  - Free assistant use is prompt-counted while paid use is credit-metered,
  *  - analysis is metered in **dollars** and no longer double-counts assistant
  *    spend,
  *  - the global daily kill-switch still sees every dollar from both ledgers,
@@ -61,9 +61,12 @@ import {
   assertPlatformBudget,
   assertPricedModel,
   BudgetExceededError,
+  freeChatbotPromptLimit,
   getChatbotCreditUsage,
+  getFreeChatbotPromptUsage,
 } from '../../server/utils/ai/budget'
-import { MONTHLY_CHATBOT_CREDITS, FREE_PLAN_CHATBOT_CREDITS } from '../../server/utils/ai/credits'
+import { MONTHLY_CHATBOT_CREDITS } from '../../server/utils/ai/credits'
+import { FREE_PLAN_CHATBOT_PROMPT_LIMIT } from '../../shared/billing'
 
 beforeEach(() => {
   state.plan = 'solo'
@@ -91,7 +94,7 @@ beforeEach(() => {
 
 afterEach(() => vi.unstubAllGlobals())
 
-describe('assistant credit allowance', () => {
+describe('assistant allowance', () => {
   it('lets a paid org under its monthly allowance through', async () => {
     state.credits = MONTHLY_CHATBOT_CREDITS.solo! - 1
     await expect(assertChatbotAllowance('org-1', 'platform')).resolves.toBeUndefined()
@@ -103,38 +106,36 @@ describe('assistant credit allowance', () => {
       .rejects.toThrow(BudgetExceededError)
   })
 
-  it('lets a free org under its lifetime grant through', async () => {
+  it('lets a free org under its lifetime prompt limit through', async () => {
     state.plan = 'free'
-    state.credits = FREE_PLAN_CHATBOT_CREDITS - 1
+    state.counts.set(aiUsageEvent, FREE_PLAN_CHATBOT_PROMPT_LIMIT - 1)
     await expect(assertChatbotAllowance('org-1', 'platform')).resolves.toBeUndefined()
   })
 
-  it('blocks a free org that has spent its lifetime grant', async () => {
+  it('blocks a free org that has submitted 20 prompts', async () => {
     state.plan = 'free'
-    state.credits = FREE_PLAN_CHATBOT_CREDITS
+    state.counts.set(aiUsageEvent, FREE_PLAN_CHATBOT_PROMPT_LIMIT)
     await expect(assertChatbotAllowance('org-1', 'platform'))
-      .rejects.toThrow(/free assistant credits/i)
+      .rejects.toThrow(/20 free assistant prompts/i)
   })
 
-  it('honours AI_FREE_PLAN_CHATBOT_CREDITS', async () => {
-    vi.stubEnv('AI_FREE_PLAN_CHATBOT_CREDITS', '50')
+  it('honours AI_FREE_PLAN_CHATBOT_TURN_LIMIT', async () => {
+    vi.stubEnv('AI_FREE_PLAN_CHATBOT_TURN_LIMIT', '50')
     state.plan = 'free'
-    state.credits = 50
+    state.counts.set(aiUsageEvent, 50)
     await expect(assertChatbotAllowance('org-1', 'platform'))
       .rejects.toThrow(BudgetExceededError)
     vi.unstubAllEnvs()
   })
 
-  it('reports the same scope for free and paid refusals', async () => {
-    // The scope reaches the client in the 429 payload. Telling a Free grant
-    // apart from a paid allowance there would let a customer infer where their
-    // plan's ceiling sits.
+  it('reports prompt and credit exhaustion with distinct scopes', async () => {
     state.plan = 'free'
-    state.credits = FREE_PLAN_CHATBOT_CREDITS
+    state.counts.set(aiUsageEvent, FREE_PLAN_CHATBOT_PROMPT_LIMIT)
     await expect(assertChatbotAllowance('org-1', 'platform'))
-      .rejects.toMatchObject({ scope: 'org_chatbot_credits' })
+      .rejects.toMatchObject({ scope: 'org_chatbot_prompts' })
 
     state.plan = 'solo'
+    state.counts.set(aiUsageEvent, 0)
     state.credits = MONTHLY_CHATBOT_CREDITS.solo!
     await expect(assertChatbotAllowance('org-1', 'platform'))
       .rejects.toMatchObject({ scope: 'org_chatbot_credits' })
@@ -144,7 +145,7 @@ describe('assistant credit allowance', () => {
     // These strings are rendered verbatim in the chat UI. A dollar amount or a
     // raw credit count there discloses the margin the credit unit exists to
     // keep private.
-    for (const plan of ['free', 'solo', 'team', 'scale']) {
+    for (const plan of ['solo', 'team', 'scale']) {
       state.plan = plan
       state.credits = 10_000_000
       await expect(assertChatbotAllowance('org-1', 'platform'))
@@ -164,7 +165,7 @@ describe('assistant credit allowance', () => {
     // Free orgs can no longer create BYOK configs, but ones grandfathered in
     // before that rule must not get the uncapped assistant for nothing.
     state.plan = 'free'
-    state.credits = FREE_PLAN_CHATBOT_CREDITS
+    state.counts.set(aiUsageEvent, FREE_PLAN_CHATBOT_PROMPT_LIMIT)
     await expect(assertChatbotAllowance('org-1', 'byok'))
       .rejects.toThrow(BudgetExceededError)
   })
@@ -177,7 +178,7 @@ describe('assistant credit allowance', () => {
   it('does not apply the allowance on a billing-disabled instance', async () => {
     state.plan = 'free'
     state.billingDisabled = true
-    state.credits = 9_999_999
+    state.counts.set(aiUsageEvent, 9_999_999)
     await expect(assertChatbotAllowance('org-1', 'byok')).resolves.toBeUndefined()
     await expect(assertChatbotAllowance('org-1', 'platform')).resolves.toBeUndefined()
   })
@@ -198,12 +199,17 @@ describe('getChatbotCreditUsage', () => {
     })
   })
 
-  it('reports the lifetime grant for a free org', async () => {
-    state.credits = 100
-    await expect(getChatbotCreditUsage('org-1', 'free')).resolves.toEqual({
-      used: 100,
-      allowance: FREE_PLAN_CHATBOT_CREDITS,
+  it('reports the exact lifetime prompt usage for a free org', async () => {
+    state.counts.set(aiUsageEvent, 7)
+    await expect(getFreeChatbotPromptUsage('org-1')).resolves.toEqual({
+      used: 7,
+      allowance: FREE_PLAN_CHATBOT_PROMPT_LIMIT,
     })
+  })
+
+  it('normalizes the Free prompt limit override to a whole prompt', () => {
+    vi.stubEnv('AI_FREE_PLAN_CHATBOT_TURN_LIMIT', '12.8')
+    expect(freeChatbotPromptLimit()).toBe(12)
   })
 })
 

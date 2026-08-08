@@ -82,29 +82,14 @@ export const FREE_PLAN_ANALYSIS_LIMIT = 50
 export const FREE_PLAN_CANDIDATE_CONVERSATION_LIMIT = 5
 
 /**
- * Roughly how many assistant messages a free org's credit grant buys — a
- * **marketing approximation only**, for public pricing copy.
+ * Lifetime assistant-prompt allowance for a hosted Free workspace.
  *
- * The enforced allowance is FREE_PLAN_CHATBOT_CREDITS (server/utils/ai/credits.ts),
- * denominated in credits rather than turns so a heavy multi-tool question costs
- * more of the grant than a one-line one. That's the right way to meter, but it
- * is not a number you can put on a pricing page, hence this separate figure.
- *
- * Keep the two roughly in step: this should approximate the grant divided by the
- * cost of a typical turn. If the grant moves and this doesn't, the pricing page
- * starts overpromising.
- *
- * The assistant is available on every plan, but Free gets a *taste*: enough to
- * reach the moment it becomes useful, not enough to live in. Twenty is roughly
- * three real sessions — the first question is exploratory, the second is badly
- * phrased, the third is the one that lands, so a five-turn allowance would read
- * as a broken demo rather than a capped feature.
- *
- * Lifetime rather than monthly on purpose: a monthly reset teaches people to
- * wait instead of upgrade, and recurs the cost forever on orgs that will never
- * convert. Same grammar as FREE_PLAN_ANALYSIS_LIMIT above.
+ * Every submitted prompt consumes exactly one slot regardless of its token
+ * length, tool calls, or answer length. Paid plans keep their monthly credit
+ * allowance. Override the hosted Free limit with
+ * AI_FREE_PLAN_CHATBOT_TURN_LIMIT.
  */
-export const FREE_PLAN_CHATBOT_APPROX_MESSAGES = 20
+export const FREE_PLAN_CHATBOT_PROMPT_LIMIT = 20
 
 /**
  * Paid, self-serve plans. Mirrors the marketing pricing page (pricing-v5). Free
@@ -249,10 +234,8 @@ export const FEATURE_MIN_TIER: Record<PlanFeature, BillingTier> = {
   // the upgrade this tier exists to sell. Grandfathered orgs outrank Solo here
   // and keep BYOK — it is the only way they can run AI at all.
   byok: 'solo',
-  // Available on every plan. Free is metered by a lifetime turn count
-  // (FREE_PLAN_CHATBOT_CREDITS) rather than blocked outright: an assistant
-  // nobody has talked to sells nothing, and a turn is a perfectly good unit to
-  // meter against now that aiUsageEvent records one row per turn.
+  // Available on every plan. Free is metered by a lifetime prompt count
+  // (FREE_PLAN_CHATBOT_PROMPT_LIMIT) rather than token usage.
   chatbot: 'free',
 }
 

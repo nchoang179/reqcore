@@ -98,7 +98,7 @@ export const PROVIDER_REGISTRY: Record<string, {
       { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash', description: 'Current stable Gemini model for frontier-quality agentic and coding tasks.', inputPricePer1m: 1.5, outputPricePer1m: 9.0, badge: 'recommended' },
       { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro Preview', description: 'Advanced preview model for complex reasoning and multimodal workflows.', inputPricePer1m: 2.0, outputPricePer1m: 12.0, badge: 'powerful' },
       { id: 'gemini-3-flash-preview', label: 'Gemini 3 Flash Preview', description: 'Fast preview model with strong multimodal understanding and tool support.', inputPricePer1m: 0.5, outputPricePer1m: 3.0, badge: 'fast' },
-      { id: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash-Lite', description: 'Cost-efficient Gemini 3 model for high-volume lightweight tasks.', inputPricePer1m: 0.25, outputPricePer1m: 1.5, badge: 'cheap' },
+      { id: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash-Lite', description: 'Cost-efficient Gemini model for focused tasks and document parsing.', inputPricePer1m: 0.3, outputPricePer1m: 2.5, badge: 'cheap' },
     ],
   },
   openrouter: {

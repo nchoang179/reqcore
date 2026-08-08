@@ -28,7 +28,11 @@ import type {
   ChatbotToolCall,
 } from '~~/shared/chatbot'
 import { PLATFORM_ENGINE_ID } from '~~/shared/chatbot'
-import { chatbotModelChoices, type ChatbotModelChoice } from '~~/shared/chatbot-models'
+import {
+  chatbotModelChoices,
+  isChatbotCatalogueModel,
+  type ChatbotModelChoice,
+} from '~~/shared/chatbot-models'
 
 /** Lightweight summary of an AI configuration as exposed by GET /api/ai-config. */
 export interface ChatbotAiConfigSummary {
@@ -268,7 +272,12 @@ export function useChatbot() {
       // Conversations remember which AI config they were last using; surface it
       // in the picker so the user sees the right model on reopen.
       selectedAiConfigId.value = res.conversation.aiConfigId ?? null
-      selectedModel.value = res.conversation.model ?? null
+      // A conversation may still carry a model retired from the selector.
+      // Clear that stale pin so the next message uses the platform default
+      // instead of sending an id the current catalogue rejects.
+      selectedModel.value = isChatbotCatalogueModel(res.conversation.model)
+        ? res.conversation.model
+        : null
       // Aggregate sources across the conversation history.
       const all: ChatbotSource[] = []
       const seen = new Set<string>()
@@ -328,7 +337,9 @@ export function useChatbot() {
       scope.value = res.conversation.scope
       selectedAgentId.value = res.conversation.agentId
       selectedAiConfigId.value = res.conversation.aiConfigId ?? null
-      selectedModel.value = res.conversation.model ?? null
+      selectedModel.value = isChatbotCatalogueModel(res.conversation.model)
+        ? res.conversation.model
+        : null
       return res.conversation
     } catch (err) {
       reportError(err, 'Failed to create conversation')

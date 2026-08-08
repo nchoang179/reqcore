@@ -6,7 +6,7 @@
  * flat menu with two halves:
  *
  *   - **Reqcore AI** — the vetted catalogue (`shared/chatbot-models.ts`), grouped
- *     by lab, three tiers each. These run on the platform key and spend the org's
+ *     by lab and capability tier. These run on the platform key and spend the org's
  *     assistant credits, so each carries its credit multiplier.
  *   - **Your own keys** — the org's BYOK configs, billed by their provider, not
  *     in credits. They bring their own model id, so no multiplier applies.
@@ -21,11 +21,12 @@
  * score onto 0–100. It is a relative benchmark indicator, not a claim that
  * general intelligence can be measured as an absolute percentage.
  */
-import { Brain, Check, ChevronUp, Settings, Star, AlertTriangle, KeyRound } from 'lucide-vue-next'
+import { Brain, Check, ChevronUp, Settings, Star, AlertTriangle, KeyRound, LockKeyhole } from 'lucide-vue-next'
 import { PLATFORM_ENGINE_ID } from '~~/shared/chatbot'
 import {
   CHATBOT_MODEL_TIER_LABELS,
   CHATBOT_MODEL_VENDOR_LABELS,
+  FREE_PLAN_CHATBOT_MODEL_ID,
   chatbotModelChoices,
   type ChatbotModelChoice,
   type ChatbotModelVendor,
@@ -44,6 +45,7 @@ const {
   updateConversation,
 } = useChatbot()
 const emit = defineEmits<{ manage: [] }>()
+const { isFree } = useChatbotQuota()
 
 const open = ref(false)
 const root = useTemplateRef<HTMLDivElement>('root')
@@ -83,6 +85,14 @@ const modelsByVendor = computed(() => {
     groups.set(model.vendor, list)
   }
   return [...groups.entries()]
+})
+
+// Correct stale/default selections as soon as the billing tier arrives. The
+// server enforces the same policy, so this is presentation rather than trust.
+watchEffect(() => {
+  if (!isFree.value || !platformAvailable.value) return
+  selectedAiConfigId.value = PLATFORM_ENGINE_ID
+  selectedModel.value = FREE_PLAN_CHATBOT_MODEL_ID
 })
 
 const label = computed(() => {
@@ -154,7 +164,7 @@ onUnmounted(() => window.removeEventListener('click', onWindowClick))
       <Brain v-else class="size-3.5 text-brand-500" />
       <span class="max-w-[160px] truncate">{{ label }}</span>
       <span
-        v-if="selectedModelChoice"
+        v-if="selectedModelChoice && !isFree"
         class="rounded bg-surface-100 dark:bg-surface-800 px-1 py-0.5 text-[10px] font-semibold text-surface-500 dark:text-surface-400"
       >{{ formatMultiplier(selectedModelChoice.multiplier) }}</span>
       <ChevronUp class="size-3 transition-transform" :class="open ? '' : 'rotate-180'" />
@@ -166,6 +176,7 @@ onUnmounted(() => window.removeEventListener('click', onWindowClick))
     >
       <!-- Default entry -->
       <button
+        v-if="!isFree"
         type="button"
         class="flex w-full items-start gap-2 px-3 py-2 text-left hover:bg-surface-100 dark:hover:bg-surface-800 cursor-pointer border-0 bg-transparent"
         @click="apply(null, null)"
@@ -192,14 +203,16 @@ onUnmounted(() => window.removeEventListener('click', onWindowClick))
         </div>
       </button>
 
-      <!-- Reqcore AI catalogue — platform-paid, metered in credits. -->
+      <!-- Reqcore AI catalogue — Free is prompt-counted; paid is credit-metered. -->
       <template v-if="platformAvailable">
         <div class="mt-1 border-t border-surface-200 dark:border-surface-800 px-3 pt-2 pb-1">
           <div class="text-[11px] font-semibold uppercase tracking-wide text-surface-500">
             Reqcore AI
           </div>
           <p class="mt-0.5 text-[11px] leading-snug text-surface-500">
-            Included in your plan. The multiplier is roughly how fast a model spends your assistant credits.
+            {{ isFree
+              ? 'Free includes Gemini 3.5 Flash-Lite. Other models unlock with Solo. Each prompt uses one of your 20 prompts, regardless of length.'
+              : 'Included in your plan. The multiplier is roughly how fast a model spends your assistant credits.' }}
           </p>
           <p class="mt-0.5 text-[11px] leading-snug text-surface-500">
             Intelligence rescales the top 20% of LM Arena text scores to 0–100%.
@@ -220,12 +233,17 @@ onUnmounted(() => window.removeEventListener('click', onWindowClick))
           <div
             v-for="m in models"
             :key="m.id"
-            class="group flex w-full items-start hover:bg-surface-100 dark:hover:bg-surface-800"
+            class="group flex w-full items-start"
+            :class="isFree && m.id !== FREE_PLAN_CHATBOT_MODEL_ID
+              ? 'opacity-55'
+              : 'hover:bg-surface-100 dark:hover:bg-surface-800'"
           >
             <button
               type="button"
-              class="flex min-w-0 flex-1 items-start gap-2 py-2 pl-3 text-left cursor-pointer border-0 bg-transparent"
-              :title="m.id"
+              class="flex min-w-0 flex-1 items-start gap-2 py-2 pl-3 text-left border-0 bg-transparent"
+              :class="isFree && m.id !== FREE_PLAN_CHATBOT_MODEL_ID ? 'cursor-not-allowed' : 'cursor-pointer'"
+              :disabled="isFree && m.id !== FREE_PLAN_CHATBOT_MODEL_ID"
+              :title="isFree && m.id !== FREE_PLAN_CHATBOT_MODEL_ID ? `${m.label} unlocks with Solo` : m.id"
               :aria-pressed="selectedModelChoice?.id === m.id"
               @click="apply(PLATFORM_ENGINE_ID, m.id)"
             >
@@ -241,6 +259,13 @@ onUnmounted(() => window.removeEventListener('click', onWindowClick))
                     class="size-3.5 shrink-0 text-brand-500"
                   />
                   <span
+                    v-else-if="isFree && m.id !== FREE_PLAN_CHATBOT_MODEL_ID"
+                    class="inline-flex shrink-0 items-center gap-1 rounded bg-surface-100 px-1.5 py-0.5 text-[10px] font-semibold text-surface-500 dark:bg-surface-800 dark:text-surface-400"
+                  >
+                    <LockKeyhole class="size-2.5" />
+                    Solo
+                  </span>
+                  <span
                     class="inline-flex shrink-0 items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-semibold"
                     :class="m.intelligence !== null
                       ? 'bg-brand-50 dark:bg-brand-950/40 text-brand-700 dark:text-brand-300'
@@ -252,7 +277,7 @@ onUnmounted(() => window.removeEventListener('click', onWindowClick))
                     <Brain class="size-2.5" />
                     {{ m.intelligence !== null ? `${m.intelligence.toFixed(1)}%` : 'Unrated' }}
                   </span>
-                  <span class="shrink-0 rounded bg-surface-100 dark:bg-surface-800 px-1 py-0.5 text-[10px] font-semibold text-surface-500 dark:text-surface-400">
+                  <span v-if="!isFree" class="shrink-0 rounded bg-surface-100 dark:bg-surface-800 px-1 py-0.5 text-[10px] font-semibold text-surface-500 dark:text-surface-400">
                     about {{ formatMultiplier(m.multiplier) }}
                   </span>
                 </div>
@@ -263,6 +288,7 @@ onUnmounted(() => window.removeEventListener('click', onWindowClick))
             </button>
             <!-- A separate sibling button keeps the star usable on touch. -->
             <button
+              v-if="!isFree"
               type="button"
               class="shrink-0 self-stretch px-2.5 py-2 cursor-pointer border-0 bg-transparent focus-visible:outline-2 focus-visible:outline-brand-500"
               :class="defaultModel === m.id ? 'opacity-100' : 'opacity-60 hover:opacity-100'"
@@ -283,7 +309,7 @@ onUnmounted(() => window.removeEventListener('click', onWindowClick))
       </template>
 
       <!-- BYOK configs — billed by the org's own provider, not in credits. -->
-      <template v-if="aiConfigs.length">
+      <template v-if="!isFree && aiConfigs.length">
         <div class="mt-1 border-t border-surface-200 dark:border-surface-800 px-3 pt-2 pb-1">
           <div class="text-[11px] font-semibold uppercase tracking-wide text-surface-500">
             Your own API keys
