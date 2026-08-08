@@ -64,7 +64,7 @@ export function useSourceTracking(options?: {
   from?: Ref<string | undefined> | string
   to?: Ref<string | undefined> | string
   /**
-   * Gate the stats request. The source-attribution dashboard is a Team+
+   * Gate the stats request. The source-attribution dashboard is a Solo+
    * entitlement, so the page passes the plan check here to avoid firing a
    * doomed 402 at the gated endpoint for orgs that can't access it. Defaults
    * to enabled when omitted.

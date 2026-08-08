@@ -155,8 +155,14 @@ describe('tierHasFeature', () => {
     }
   })
 
-  it('gates source / timeline / AI analytics dashboards at Team+', () => {
-    for (const feature of ['sourceAnalytics', 'activityTimeline', 'aiAnalytics'] as const) {
+  it('gates source analytics at Solo+', () => {
+    expect(tierHasFeature('free', 'sourceAnalytics')).toBe(false)
+    expect(tierHasFeature('solo', 'sourceAnalytics')).toBe(true)
+    expect(tierHasFeature('team', 'sourceAnalytics')).toBe(true)
+  })
+
+  it('gates timeline / AI analytics dashboards at Team+', () => {
+    for (const feature of ['activityTimeline', 'aiAnalytics'] as const) {
       expect(tierHasFeature('solo', feature)).toBe(false)
       expect(tierHasFeature('team', feature)).toBe(true)
     }

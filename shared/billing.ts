@@ -126,6 +126,7 @@ export const BILLING_PLANS: BillingPlan[] = [
       'Bring your own AI key (BYOK)',
       'Full shortlist workflow',
       'Branded career page for your open roles',
+      'Source analytics dashboard',
       'Two-way candidate messaging inbox',
       'Invite your whole team. No per-seat fees.',
       'Share and export shortlists',
@@ -201,7 +202,7 @@ export type PlanFeature =
   | 'candidateMessaging' // Readable inbox on every plan; Free outbound is count-limited
   | 'careerPage' // Branded per-org career page — available on every plan
   | 'calendar' // Calendar (Google) sync on interviews — Team and above
-  | 'sourceAnalytics' // Source attribution dashboard — Team and above
+  | 'sourceAnalytics' // Source attribution dashboard — Solo and above
   | 'activityTimeline' // Org-wide activity timeline — Team and above
   | 'aiAnalytics' // AI Analysis dashboard (provider health, scoring volume) — Team and above
   | 'sso' // SSO / SAML / SCIM provider registration — Scale and above
@@ -237,7 +238,7 @@ export const FEATURE_MIN_TIER: Record<PlanFeature, BillingTier> = {
   candidateMessaging: 'free',
   careerPage: 'free',
   calendar: 'team',
-  sourceAnalytics: 'team',
+  sourceAnalytics: 'solo',
   activityTimeline: 'team',
   aiAnalytics: 'team',
   sso: 'scale',

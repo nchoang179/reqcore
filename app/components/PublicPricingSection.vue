@@ -88,6 +88,7 @@ const paidPlanFeatures: Record<BillingPlanId, { heading: string; features: strin
       'Full shortlist workflow',
       'Custom scoring criteria',
       'Saved views and filters',
+      'Source analytics dashboard',
       'Unlimited candidate messaging',
       'Share and export shortlists',
       'Email support',
