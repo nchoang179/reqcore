@@ -457,9 +457,16 @@ const {
 
 // Keep the last successfully loaded application visible while the next one is
 // being fetched, so switching candidates swaps the detail in place instead of
-// flashing the skeleton (and header fields don't vanish/reappear). Only before
-// the very first load is this null.
-const resolvedCurrentApplication = computed(() => currentApplication.value ?? null)
+// flashing the skeleton (and header fields don't vanish/reappear). `useFetch`
+// resets its own data ref every time the keyed request changes, so we hold on
+// to the previous payload ourselves. Only before the very first load is this
+// null.
+const lastLoadedApplication = shallowRef<SwipeApplicationDetail | null>(currentApplication.value ?? null)
+watch(currentApplication, (app) => {
+  if (app) lastLoadedApplication.value = app
+}, { immediate: true })
+
+const resolvedCurrentApplication = computed(() => currentApplication.value ?? lastLoadedApplication.value)
 
 // The automation rule (if any) that auto-set this application's status on
 // submit, plus a lookup of which responses triggered it — drives the "Auto"
@@ -475,25 +482,28 @@ const isDetailStale = computed(() =>
   !currentApplication.value || currentApplication.value.id !== currentApplicationId.value,
 )
 
-// Fall back to the skeleton only when a fetch is genuinely slow. Fast/cached
-// navigations resolve before this fires, so the content simply swaps in place.
-const showDetailSkeleton = ref(false)
-let detailSkeletonTimer: ReturnType<typeof setTimeout> | null = null
+// Once a candidate has been shown we never fall back to the skeleton again —
+// the previous detail stays on screen and the new one swaps into it. For a
+// genuinely slow fetch we instead dim the (now outdated) content after a short
+// delay, so the user gets a loading cue without the layout tearing down. Fast
+// and cached switches resolve before this fires and show nothing at all.
+const showDetailLoadingVeil = ref(false)
+let detailVeilTimer: ReturnType<typeof setTimeout> | null = null
 watch(isDetailStale, (stale) => {
-  if (detailSkeletonTimer) {
-    clearTimeout(detailSkeletonTimer)
-    detailSkeletonTimer = null
+  if (detailVeilTimer) {
+    clearTimeout(detailVeilTimer)
+    detailVeilTimer = null
   }
   if (stale) {
-    detailSkeletonTimer = setTimeout(() => {
-      showDetailSkeleton.value = true
-    }, 180)
+    detailVeilTimer = setTimeout(() => {
+      showDetailLoadingVeil.value = true
+    }, 250)
   } else {
-    showDetailSkeleton.value = false
+    showDetailLoadingVeil.value = false
   }
 })
 onBeforeUnmount(() => {
-  if (detailSkeletonTimer) clearTimeout(detailSkeletonTimer)
+  if (detailVeilTimer) clearTimeout(detailVeilTimer)
 })
 
 const hasCoverLetter = computed(() => Boolean(resolvedCurrentApplication.value?.coverLetterText?.trim()))
@@ -2137,10 +2147,14 @@ function closeDocPreview() {
 
             <!-- Detail content -->
             <div
-              class="bg-surface-50/80 px-4 dark:bg-surface-950/80 sm:px-6"
-              :class="detailTab === 'inbox' ? 'flex min-h-0 flex-1 flex-col overflow-hidden py-4 sm:py-5' : 'py-5 sm:py-8'"
+              class="bg-surface-50/80 px-4 transition-opacity duration-300 ease-out dark:bg-surface-950/80 sm:px-6"
+              :class="[
+                detailTab === 'inbox' ? 'flex min-h-0 flex-1 flex-col overflow-hidden py-4 sm:py-5' : 'py-5 sm:py-8',
+                showDetailLoadingVeil ? 'pointer-events-none select-none opacity-50' : 'opacity-100',
+              ]"
+              :aria-busy="isDetailStale ? 'true' : undefined"
             >
-              <div v-if="!resolvedCurrentApplication || showDetailSkeleton" class="space-y-5 mx-auto animate-pulse" :class="detailWidthClass" aria-label="Loading candidate details">
+              <div v-if="!resolvedCurrentApplication" class="space-y-5 mx-auto animate-pulse" :class="detailWidthClass" aria-label="Loading candidate details">
                 <div class="h-28 rounded-xl border border-surface-200/80 bg-white dark:border-surface-800/60 dark:bg-surface-900" />
                 <div class="h-40 rounded-xl border border-surface-200/80 bg-white dark:border-surface-800/60 dark:bg-surface-900" />
                 <div class="h-32 rounded-xl border border-surface-200/80 bg-white dark:border-surface-800/60 dark:bg-surface-900" />
