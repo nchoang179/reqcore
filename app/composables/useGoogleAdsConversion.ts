@@ -10,6 +10,18 @@
  */
 type ConversionEvent = "signup" | "org_created";
 
+/**
+ * Google Ads labels are short base64-ish tokens (e.g. 'AbC-D_efGhIjKlMn').
+ * Anything else — most often a copied placeholder like '<label>' or the
+ * AW- account id pasted by mistake — is treated as unconfigured, so a
+ * misconfigured deploy sends nothing rather than junk Ads never accepts.
+ */
+function isValidLabel(label: string | undefined): label is string {
+    if (!label) return false;
+    if (label.startsWith("AW-")) return false;
+    return /^[\w-]{6,}$/.test(label);
+}
+
 export function useGoogleAdsConversion() {
     const config = useRuntimeConfig().public as Record<string, string>;
 
@@ -34,7 +46,7 @@ export function useGoogleAdsConversion() {
 
         const adsId = config.googleAdsId;
         const label = labels[event];
-        if (!adsId || !label) return;
+        if (!adsId || !isValidLabel(label)) return;
         if (typeof window.gtag !== "function") return;
 
         window.gtag("event", "conversion", {
