@@ -8,7 +8,7 @@
  * conversion action → "Tag setup" → the `send_to` value after the slash.
  * They are per-action, not per-account, so each event needs its own.
  */
-type ConversionEvent = "signup" | "org_created";
+type ConversionEvent = "signup" | "org_created" | "subscription";
 
 /**
  * Google Ads labels are short base64-ish tokens (e.g. 'AbC-D_efGhIjKlMn').
@@ -28,6 +28,7 @@ export function useGoogleAdsConversion() {
     const labels: Record<ConversionEvent, string | undefined> = {
         signup: config.googleAdsSignupLabel,
         org_created: config.googleAdsOrgCreatedLabel,
+        subscription: config.googleAdsSubscriptionLabel,
     };
 
     /**

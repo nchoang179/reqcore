@@ -274,6 +274,8 @@ export default defineNuxtConfig({
         process.env.NUXT_PUBLIC_GOOGLE_ADS_SIGNUP_LABEL || "",
       googleAdsOrgCreatedLabel:
         process.env.NUXT_PUBLIC_GOOGLE_ADS_ORG_CREATED_LABEL || "",
+      googleAdsSubscriptionLabel:
+        process.env.NUXT_PUBLIC_GOOGLE_ADS_SUBSCRIPTION_LABEL || "",
     },
   },
 
