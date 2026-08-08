@@ -45,18 +45,16 @@ export const FEATURE_FLAGS = {
   /**
    * New AI chatbot experience embedded in the dashboard.
    *
-   * Off by default everywhere. Enable on the cloud version via PostHog
-   * (gradual rollout), or self-hosters can force it on with
-   * `FEATURE_FLAG_CHATBOT_EXPERIENCE=true`.
+   * On by default everywhere. Cloud operators and self-hosters can still use
+   * PostHog or `FEATURE_FLAG_CHATBOT_EXPERIENCE=false` as a kill switch.
    *
    * This flag answers "has it shipped?", not "how much may this org use?" —
    * the assistant is entitled on every plan (`chatbot` in shared/billing.ts),
    * with Free capped at FREE_PLAN_CHATBOT_CREDITS by the credit gate in
-   * server/utils/ai/budget.ts. Once the rollout is complete, flip this default
-   * to `true` and the turn cap stands alone.
+   * server/utils/ai/budget.ts.
    */
   'chatbot-experience': {
-    defaultValue: false,
+    defaultValue: true,
     description: 'New AI chatbot experience in the dashboard.',
   },
 } as const satisfies Record<string, FeatureFlagDefinition>
