@@ -4,12 +4,19 @@
  * Only loads when NUXT_PUBLIC_GOOGLE_ADS_ID is set, which is Reqcore Cloud
  * only. Self-hosted deployments get no Google tag and no outbound request.
  *
- * Consent Mode v2 defaults are written before gtag.js loads, so ad_storage
- * starts 'denied' and only upgrades if the visitor accepts on the banner.
- * The consent cookie is shared across *.reqcore.com, so a visitor who
- * accepted on the marketing site arrives here already granted.
+ * This plugin is universal, not client-only, on purpose: the consent snippet
+ * must be rendered during SSR so server/plugins/csp-nonce.ts can stamp it with
+ * the per-request nonce. Injected from the client it carries no nonce and the
+ * CSP in server/middleware/csp.ts blocks it.
  *
- * Conversions themselves are fired from useGoogleAdsConversion().
+ * Nothing here may throw. An ad blocker, a CSP change or a network failure can
+ * all leave gtag.js unloaded, and this plugin runs on the sign-up page — a
+ * crash here takes down the page it is trying to measure. Every entry point
+ * goes through ensureGtag(), which falls back to a local dataLayer shim.
+ *
+ * Consent Mode v2 defaults keep ad_storage 'denied' until the visitor accepts.
+ * The consent cookie is shared across *.reqcore.com, so someone who accepted
+ * on the marketing site arrives here already granted.
  */
 import { CONSENT_COOKIE_NAME } from "~/composables/useAnalyticsConsent";
 
@@ -20,16 +27,30 @@ declare global {
     }
 }
 
+/**
+ * Return a usable gtag function, creating the standard dataLayer shim if the
+ * inline snippet never ran (CSP, ad blocker). Calls made through the shim
+ * queue in dataLayer and are picked up if gtag.js loads later.
+ */
+function ensureGtag(): (...args: unknown[]) => void {
+    window.dataLayer = window.dataLayer || [];
+    if (typeof window.gtag !== "function") {
+        window.gtag = function gtag() {
+            // eslint-disable-next-line prefer-rest-params
+            window.dataLayer.push(arguments as unknown as Record<string, unknown>);
+        };
+    }
+    return window.gtag;
+}
+
 export default defineNuxtPlugin((nuxtApp) => {
     const config = useRuntimeConfig().public as Record<string, string>;
     const googleAdsId = config.googleAdsId ?? "";
     const marketingUrl = config.marketingUrl ?? "";
     if (!googleAdsId) return;
 
-    const consentCookie = useCookie<string | null>(CONSENT_COOKIE_NAME);
-
-    // Consent Mode v2 defaults — must execute before gtag.js loads so the tag
-    // reads the correct initial state. Mirrors reqcore-web's consentMode.ts.
+    // Rendered server-side so the CSP nonce is applied. Must execute before
+    // gtag.js so the tag reads the correct initial consent state.
     useHead({
         script: [
             {
@@ -55,9 +76,13 @@ gtag('set', 'ads_data_redaction', true);
         ],
     });
 
+    if (!import.meta.client) return;
+
+    const consentCookie = useCookie<string | null>(CONSENT_COOKIE_NAME);
+
     // Cross-domain linking back to the marketing site — accept_incoming reads
     // the _gl parameter reqcore.com puts on outbound links, so the ad click id
-    // survives the hop to this host and conversions get attributed to it.
+    // survives the hop and conversions are attributed to it.
     const linkerDomains = [window.location.hostname];
     try {
         linkerDomains.push(new URL(marketingUrl).hostname.replace(/^www\./, ""));
@@ -71,20 +96,24 @@ gtag('set', 'ads_data_redaction', true);
         if (hasLoaded) return;
         hasLoaded = true;
 
+        const gtag = ensureGtag();
+
         const script = document.createElement("script");
         script.async = true;
         script.src = `https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(googleAdsId)}`;
+        // Blocked by CSP, an ad blocker or offline: the queued dataLayer calls
+        // simply never send. Swallow it rather than surfacing an error.
+        script.onerror = () => {};
         document.head.appendChild(script);
 
-        window.gtag("js", new Date());
-        window.gtag("config", googleAdsId, {
+        gtag("js", new Date());
+        gtag("config", googleAdsId, {
             linker: { domains: linkerDomains, accept_incoming: true },
         });
     }
 
     // Load eagerly on auth/onboarding routes — a conversion can fire within
-    // seconds there and gtag must already be present. Everywhere else it can
-    // wait for idle time.
+    // seconds there and gtag must already be present. Elsewhere, wait for idle.
     const isConversionRoute = (path: string) =>
         path.includes("/auth/") || path.includes("/onboarding");
 
@@ -98,15 +127,14 @@ gtag('set', 'ads_data_redaction', true);
             : window.setTimeout(loadGtag, 1500);
     });
 
-    const router = useRouter();
-    router.beforeEach((to) => {
+    useRouter().beforeEach((to) => {
         if (isConversionRoute(to.path)) loadGtag();
     });
 
     // Mirror consent changes made in this app onto the Ads tag.
     watchEffect(() => {
         const state = consentCookie.value === "granted" ? "granted" : "denied";
-        window.gtag?.("consent", "update", {
+        ensureGtag()("consent", "update", {
             ad_storage: state,
             ad_user_data: state,
             ad_personalization: state,
