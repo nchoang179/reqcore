@@ -7,7 +7,7 @@
  * - 5 jobs with varying statuses
  * - 420 candidates
  * - 427+ applications across all pipeline stages (134 on Senior Full-Stack Engineer, 262 on Product Designer)
- * - Custom questions on select jobs
+ * - Custom application questions and automation rules for every job
  * - Question responses on applications
  * - 20 tracking links across 14+ source channels (LinkedIn, Indeed, etc.)
  * - 160+ application source attribution records with UTM & referrer data
@@ -27,6 +27,10 @@ import { hashPassword } from "better-auth/crypto";
 import * as schema from "../database/schema";
 import { resolveDatabaseUrl } from "../utils/database-url";
 import { encrypt } from "../utils/encryption";
+import {
+  DEMO_AUTOMATION_RULES,
+  DEMO_JOB_QUESTIONS,
+} from "./seed-data/automation";
 
 // ─────────────────────────────────────────────
 // Config
@@ -2750,79 +2754,6 @@ const CANDIDATES_DATA = [
     lastName: "Bos",
     email: "sanne.bos@example.com",
     phone: "+31 6 78901234",
-  },
-];
-
-// Questions for the Senior Full-Stack Engineer job
-const FULLSTACK_QUESTIONS = [
-  {
-    type: "short_text" as const,
-    label: "Years of TypeScript experience",
-    required: true,
-  },
-  {
-    type: "single_select" as const,
-    label: "Preferred frontend framework",
-    options: ["Vue", "React", "Svelte", "Angular", "Solid"],
-    required: true,
-  },
-  {
-    type: "long_text" as const,
-    label: "Describe a challenging technical problem you solved recently",
-    required: true,
-  },
-  {
-    type: "url" as const,
-    label: "Link to your GitHub profile or portfolio",
-    required: false,
-  },
-  {
-    type: "single_select" as const,
-    label: "When can you start?",
-    options: ["Immediately", "2 weeks", "1 month", "2-3 months"],
-    required: true,
-  },
-];
-
-// Questions for Product Designer
-const DESIGNER_QUESTIONS = [
-  { type: "url" as const, label: "Link to your portfolio", required: true },
-  {
-    type: "single_select" as const,
-    label: "Primary design tool",
-    options: ["Figma", "Sketch", "Adobe XD", "Framer"],
-    required: true,
-  },
-  {
-    type: "long_text" as const,
-    label: "Walk us through your design process for a recent project",
-    required: true,
-  },
-  {
-    type: "checkbox" as const,
-    label: "I have experience with design systems",
-    required: false,
-  },
-];
-
-// Questions for DevOps Engineer
-const DEVOPS_QUESTIONS = [
-  {
-    type: "multi_select" as const,
-    label: "Which cloud platforms have you worked with?",
-    options: ["AWS", "GCP", "Azure", "Hetzner", "DigitalOcean", "Other"],
-    required: true,
-  },
-  {
-    type: "short_text" as const,
-    label: "Years of Docker experience",
-    required: true,
-  },
-  {
-    type: "single_select" as const,
-    label: "Preferred CI/CD platform",
-    options: ["GitHub Actions", "GitLab CI", "Jenkins", "CircleCI", "Other"],
-    required: true,
   },
 ];
 
@@ -7178,14 +7109,14 @@ const INTERVIEWS_DATA: InterviewSeed[] = [
 function generateResponses(
   jobIndex: number,
   candidateIndex: number,
-): Record<string, string | string[] | boolean> {
+): Record<string, string | string[] | number | boolean> {
   const candidate = CANDIDATES_DATA[candidateIndex];
   if (!candidate) {
     return {};
   }
 
   if (jobIndex === 0) {
-    const years = ["3", "4", "5", "6", "7", "8+"];
+    const years = [5, 6, 7, 8, 5, 6];
     const frameworks = ["Vue", "React", "Svelte", "Vue", "React", "Vue"];
     const starts = [
       "Immediately",
@@ -7233,6 +7164,7 @@ function generateResponses(
     );
     return {
       "Link to your portfolio": `https://dribbble.com/${candidate.firstName.toLowerCase()}${candidate.lastName.toLowerCase().charAt(0)}`,
+      "Years of product design experience": 3 + (candidateIndex % 5),
       "Primary design tool": tool,
       "Walk us through your design process for a recent project": process,
       "I have experience with design systems": candidateIndex % 2 === 0,
@@ -7255,7 +7187,7 @@ function generateResponses(
       "GitHub Actions",
       "CircleCI",
     ];
-    const dockerYears = ["3", "4", "5", "6", "2", "7"];
+    const dockerYears = [3, 4, 5, 6, 3, 7];
     const i = candidateIndex % platforms.length;
     const platformList = getArrayItemOrThrow(
       platforms,
@@ -7276,6 +7208,44 @@ function generateResponses(
       "Which cloud platforms have you worked with?": platformList,
       "Years of Docker experience": dockerYear,
       "Preferred CI/CD platform": ciPlatform,
+    };
+  }
+  if (jobIndex === 3) {
+    const documentation = [
+      ["API documentation", "User guides", "Release notes"],
+      ["Deployment guides", "Tutorials"],
+      ["API documentation", "Deployment guides"],
+      ["User guides", "Tutorials", "Release notes"],
+    ];
+    const i = candidateIndex % documentation.length;
+    return {
+      "Link to a technical writing sample": `https://docs.example.com/${candidate.firstName.toLowerCase()}-${candidate.lastName.toLowerCase().replace(/['\s]/g, "-")}`,
+      "Years of technical writing experience": 2 + (candidateIndex % 5),
+      "Which documentation have you owned?": getArrayItemOrThrow(
+        documentation,
+        i,
+        "documentation ownership response",
+      ),
+      "I have worked in a docs-as-code workflow": candidateIndex % 3 !== 0,
+    };
+  }
+  if (jobIndex === 4) {
+    const technologies = [
+      ["HTML/CSS", "JavaScript", "TypeScript", "Vue"],
+      ["HTML/CSS", "JavaScript", "React"],
+      ["HTML/CSS", "JavaScript", "Vue"],
+      ["HTML/CSS", "JavaScript", "TypeScript"],
+    ];
+    const i = candidateIndex % technologies.length;
+    return {
+      "Are you currently enrolled in a degree program?": "Yes",
+      "Can you work on-site in Berlin for this internship?":
+        candidateIndex % 2 === 0
+          ? "Yes — on-site in Berlin"
+          : "Yes — I can relocate",
+      "Which frontend technologies have you used in projects?":
+        getArrayItemOrThrow(technologies, i, "frontend technologies response"),
+      "Link to a GitHub profile or frontend project": `https://github.com/${candidate.firstName.toLowerCase()}${candidate.lastName.toLowerCase().replace(/['\s]/g, "")}`,
     };
   }
   return {};
@@ -9461,17 +9431,25 @@ async function seed() {
 
   console.log(`✅ Created ${CANDIDATES_DATA.length} candidates`);
 
-  // 5. Create custom questions for first 3 jobs
-  const questionSets = [
-    FULLSTACK_QUESTIONS,
-    DESIGNER_QUESTIONS,
-    DEVOPS_QUESTIONS,
-  ];
-  const questionIdsByJob: Map<number, { questionId: string; label: string }[]> =
-    new Map();
+  // 5. Create custom questions and automation rules for every demo job
+  if (
+    DEMO_JOB_QUESTIONS.length !== JOBS_DATA.length ||
+    DEMO_AUTOMATION_RULES.length !== JOBS_DATA.length
+  ) {
+    throw new Error("Every demo job must have questions and automation rules");
+  }
 
-  for (let jobIndex = 0; jobIndex < questionSets.length; jobIndex++) {
-    const questions = questionSets[jobIndex];
+  const questionIdsByJob: Map<
+    number,
+    {
+      questionId: string;
+      label: string;
+      type: (typeof DEMO_JOB_QUESTIONS)[number][number]["type"];
+    }[]
+  > = new Map();
+
+  for (let jobIndex = 0; jobIndex < DEMO_JOB_QUESTIONS.length; jobIndex++) {
+    const questions = DEMO_JOB_QUESTIONS[jobIndex];
     const jobId = jobIds[jobIndex];
     if (!questions || !jobId) {
       throw new Error(
@@ -9479,7 +9457,11 @@ async function seed() {
       );
     }
 
-    const questionIds: { questionId: string; label: string }[] = [];
+    const questionIds: {
+      questionId: string;
+      label: string;
+      type: (typeof DEMO_JOB_QUESTIONS)[number][number]["type"];
+    }[] = [];
 
     for (let qi = 0; qi < questions.length; qi++) {
       const q = questions[qi];
@@ -9488,7 +9470,7 @@ async function seed() {
       }
 
       const questionId = id();
-      questionIds.push({ questionId, label: q.label });
+      questionIds.push({ questionId, label: q.label, type: q.type });
 
       await db.insert(schema.jobQuestion).values({
         id: questionId,
@@ -9497,7 +9479,7 @@ async function seed() {
         type: q.type,
         label: q.label,
         required: q.required,
-        options: "options" in q ? q.options : null,
+        options: q.options ?? null,
         displayOrder: qi,
         createdAt: daysAgo(18),
         updatedAt: daysAgo(18),
@@ -9507,7 +9489,66 @@ async function seed() {
     questionIdsByJob.set(jobIndex, questionIds);
   }
 
-  console.log(`✅ Created custom questions for ${questionSets.length} jobs`);
+  console.log(`✅ Created custom questions for ${DEMO_JOB_QUESTIONS.length} jobs`);
+
+  let totalAutomationRules = 0;
+
+  for (let jobIndex = 0; jobIndex < DEMO_AUTOMATION_RULES.length; jobIndex++) {
+    const rules = DEMO_AUTOMATION_RULES[jobIndex];
+    const jobId = jobIds[jobIndex];
+    const questions = questionIdsByJob.get(jobIndex);
+    if (!rules || !jobId || !questions) {
+      throw new Error(
+        `Invalid automation seed configuration at job index ${jobIndex}`,
+      );
+    }
+
+    const questionsByLabel = new Map(questions.map((q) => [q.label, q]));
+
+    for (let displayOrder = 0; displayOrder < rules.length; displayOrder++) {
+      const rule = rules[displayOrder];
+      if (!rule) continue;
+
+      const conditions = rule.conditions.map((condition) => {
+        const question = questionsByLabel.get(condition.questionLabel);
+        if (!question) {
+          throw new Error(
+            `Automation rule "${rule.name}" references missing question "${condition.questionLabel}"`,
+          );
+        }
+        if (question.type !== condition.questionType) {
+          throw new Error(
+            `Automation rule "${rule.name}" expects "${condition.questionLabel}" to be ${condition.questionType}, got ${question.type}`,
+          );
+        }
+
+        return {
+          questionId: question.questionId,
+          operator: condition.operator,
+          ...(condition.value !== undefined ? { value: condition.value } : {}),
+        };
+      });
+
+      await db.insert(schema.applicationRule).values({
+        id: id(),
+        organizationId: orgId,
+        jobId,
+        name: rule.name,
+        matchType: rule.matchType,
+        action: rule.action,
+        enabled: rule.enabled,
+        conditions,
+        displayOrder,
+        createdAt: daysAgo(17),
+        updatedAt: daysAgo(17),
+      });
+      totalAutomationRules++;
+    }
+  }
+
+  console.log(
+    `✅ Created ${totalAutomationRules} automation rules across ${JOBS_DATA.length} jobs`,
+  );
 
   // 6. Create applications with status distribution
   let totalApps = 0;
