@@ -39,9 +39,9 @@ interface ProviderInfo {
   models: { id: string, label: string, description: string, inputPricePer1m?: number, outputPricePer1m?: number, badge?: 'recommended' | 'fast' | 'powerful' | 'cheap' }[]
 }
 
-const { allowed: canManageAi, isLoading: isPermissionLoading } = usePermission({ scoring: ['create'] })
+const { allowed: canManageAi, isLoading: isPermissionLoading } = usePermission({ aiConfig: ['create'] })
 
-// Adding an AI model (BYOK) is available on every plan; guard direct navigation here too.
+// Adding an AI model (BYOK) is Solo and above; guard direct navigation here too.
 const { hasFeature } = usePlanFeature()
 const canUseByok = computed(() => hasFeature('byok'))
 

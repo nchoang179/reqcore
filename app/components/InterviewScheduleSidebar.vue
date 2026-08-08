@@ -290,7 +290,7 @@ function finish() {
               </button>
               <NuxtLink
                 v-if="savedInterview.delivery?.errorCode === 'candidate_message_limit'"
-                :to="$localePath('/pricing')"
+                :to="$localePath('/dashboard/settings/billing')"
                 class="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-brand-600 px-4 text-sm font-semibold text-white hover:bg-brand-700"
               >
                 Upgrade to keep the thread in Reqcore

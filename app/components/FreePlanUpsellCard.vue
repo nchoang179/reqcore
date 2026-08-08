@@ -1,19 +1,21 @@
 <script setup lang="ts">
 /**
  * Free-plan usage + upsell card shown on the billing page when an org is on the
- * free tier. Surfaces the two count-based caps (active roles, AI shortlists) as
- * meters that warn as they fill, with a one-click upgrade to the entry plan.
+ * free tier. Surfaces the count-based caps (active roles, AI shortlists,
+ * assistant messages, candidate conversations) as meters that warn as they
+ * fill, with a one-click upgrade to the entry plan.
  *
  * Purely presentational — usage comes from /api/billing/status; the upgrade
  * itself is handled by the parent so checkout state stays in one place.
  */
-import { ArrowRight, Briefcase, MessageSquare, Sparkles, Zap } from 'lucide-vue-next'
+import { ArrowRight, Briefcase, MessageCircle, MessageSquare, Sparkles, Zap } from 'lucide-vue-next'
 import { getBillingPlan } from '~~/shared/billing'
 import type { UsageMeter } from '~/composables/useBillingStatus'
 
 defineProps<{
   activeRoles: UsageMeter
   aiAnalysis: UsageMeter
+  aiAssistant: UsageMeter
   candidateConversations: UsageMeter
   /** Disables the upgrade button for members who can't change billing. */
   canManage?: boolean
@@ -91,6 +93,23 @@ const recommended = getBillingPlan('solo')!
             </p>
             <p v-else class="mt-1.5 text-xs text-surface-400 dark:text-surface-500">
               Free orgs get {{ aiAnalysis.limit }} platform-paid AI runs. Paid plans are unlimited.
+            </p>
+          </template>
+        </UsageMeterBar>
+
+        <UsageMeterBar
+          label="Assistant prompts"
+          :icon="MessageCircle"
+          :used="aiAssistant.used"
+          :limit="aiAssistant.limit"
+          :value-label="`${aiAssistant.used} / ${aiAssistant.limit} used`"
+        >
+          <template #default="{ tone }">
+            <p v-if="tone === 'full'" class="mt-1.5 text-xs text-danger-600 dark:text-danger-400">
+              You've used all 20 free assistant prompts. Upgrade to keep chatting — your conversations stay readable.
+            </p>
+            <p v-else class="mt-1.5 text-xs text-surface-400 dark:text-surface-500">
+              Every prompt counts once, regardless of length or model usage.
             </p>
           </template>
         </UsageMeterBar>

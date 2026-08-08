@@ -1,10 +1,12 @@
 import { fileTypeFromBuffer } from 'file-type'
-import { parseDocument } from '../../utils/resume-parser'
-import { saveChatbotAttachment } from '../../utils/chatbotAttachments'
+import { DocumentLimitError, parseDocumentIsolated } from '../../utils/resume-parser'
+import { ChatbotAttachmentQuotaError, saveChatbotAttachment } from '../../utils/chatbotAttachments'
+import { readLimitedMultipartFile } from '../../utils/limitedMultipart'
 import { requireChatbotAccess } from '../../utils/chatbotAccess'
 import { createRateLimiter } from '../../utils/rateLimit'
 import {
   CHATBOT_MAX_UPLOAD_BYTES,
+  CHATBOT_MAX_STORED_ATTACHMENT_CHARS,
   type ChatbotAttachment,
 } from '../../../shared/chatbot'
 
@@ -33,17 +35,7 @@ export default defineEventHandler(async (event) => {
   await limiter(event)
   const session = await requireChatbotAccess(event)
 
-  const form = await readMultipartFormData(event)
-  const filePart = form?.find((p) => p.name === 'file')
-  if (!filePart?.data || !filePart.filename) {
-    throw createError({ statusCode: 400, statusMessage: 'No file provided' })
-  }
-  if (filePart.data.length > CHATBOT_MAX_UPLOAD_BYTES) {
-    throw createError({
-      statusCode: 413,
-      statusMessage: `File too large. Max ${CHATBOT_MAX_UPLOAD_BYTES / 1024 / 1024} MB.`,
-    })
-  }
+  const filePart = await readLimitedMultipartFile(event, 'file', CHATBOT_MAX_UPLOAD_BYTES)
 
   const buf = filePart.data
   const detected = await fileTypeFromBuffer(buf)
@@ -59,10 +51,20 @@ export default defineEventHandler(async (event) => {
 
   let text = ''
   if (PARSEABLE_MIME.has(mime)) {
-    const parsed = await parseDocument(buf, mime)
-    text = parsed?.text ?? ''
+    try {
+      const parsed = await parseDocumentIsolated(buf, mime, {
+        maxCharacters: CHATBOT_MAX_STORED_ATTACHMENT_CHARS,
+      })
+      text = parsed?.text ?? ''
+    }
+    catch (error) {
+      if (error instanceof DocumentLimitError) {
+        throw createError({ statusCode: 422, statusMessage: error.message })
+      }
+      throw error
+    }
   } else if (mime.startsWith('text/') || mime === 'application/json') {
-    text = buf.toString('utf8')
+    text = buf.toString('utf8').slice(0, CHATBOT_MAX_STORED_ATTACHMENT_CHARS)
   } else {
     throw createError({
       statusCode: 415,
@@ -85,12 +87,20 @@ export default defineEventHandler(async (event) => {
     textLength: text.length,
   }
 
-  saveChatbotAttachment({
-    userId: session.user.id,
-    orgId: session.session.activeOrganizationId,
-    attachment,
-    text,
-  })
+  try {
+    saveChatbotAttachment({
+      userId: session.user.id,
+      orgId: session.session.activeOrganizationId,
+      attachment,
+      text,
+    })
+  }
+  catch (error) {
+    if (error instanceof ChatbotAttachmentQuotaError) {
+      throw createError({ statusCode: 413, statusMessage: error.message })
+    }
+    throw error
+  }
 
   return attachment
 })

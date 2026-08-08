@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gte, isNull, lte } from 'drizzle-orm'
+import { and, asc, count, desc, eq, gte, isNull, lte, sql } from 'drizzle-orm'
 import { interview, application, candidate, job } from '../../database/schema'
 import { interviewQuerySchema } from '../../utils/schemas/interview'
 
@@ -30,6 +30,13 @@ export default defineEventHandler(async (event) => {
   }
 
   const whereClause = and(...conditions)
+  const orderBy = query.order === 'scheduled_first'
+    ? [
+        sql`CASE WHEN ${interview.status} = 'scheduled' THEN 0 ELSE 1 END`,
+        sql`CASE WHEN ${interview.status} = 'scheduled' THEN ${interview.scheduledAt} END ASC`,
+        sql`CASE WHEN ${interview.status} <> 'scheduled' THEN ${interview.scheduledAt} END DESC`,
+      ]
+    : [query.order === 'asc' ? asc(interview.scheduledAt) : desc(interview.scheduledAt)]
 
   const [data, total] = await Promise.all([
     db
@@ -64,7 +71,7 @@ export default defineEventHandler(async (event) => {
       .innerJoin(candidate, eq(candidate.id, application.candidateId))
       .innerJoin(job, eq(job.id, application.jobId))
       .where(whereClause)
-      .orderBy(desc(interview.scheduledAt))
+      .orderBy(...orderBy)
       .limit(query.limit)
       .offset((query.page - 1) * query.limit),
     db

@@ -25,7 +25,7 @@ const testSchema = z.object({ ok: z.boolean() })
  */
 export default defineEventHandler(async (event) => {
   await limiter(event)
-  const session = await requirePermission(event, { scoring: ['read'] })
+  const session = await requirePermission(event, { aiConfig: ['update'] })
   const orgId = session.session.activeOrganizationId
   const { id } = await getValidatedRouterParams(event, paramsSchema.parse)
 

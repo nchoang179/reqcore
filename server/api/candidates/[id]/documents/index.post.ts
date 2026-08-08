@@ -10,7 +10,7 @@ import {
   documentTypeSchema,
   sanitizeFilename,
 } from '../../../../utils/schemas/document'
-import { parseDocument } from '../../../../utils/resume-parser'
+import { parseDocumentSafelyIsolated } from '../../../../utils/resume-parser'
 import { findActiveCandidate } from '../../../../utils/candidate-retention'
 
 /**
@@ -139,7 +139,7 @@ export default defineEventHandler(async (event) => {
   // 8. Parse document content (best-effort — does not block upload)
   // ─────────────────────────────────────────────
 
-  const parsedContent = await parseDocument(fileBuffer, mimeType)
+  const parsedContent = await parseDocumentSafelyIsolated(fileBuffer, mimeType)
 
   // ─────────────────────────────────────────────
   // 9. Insert DB record — clean up S3 on failure

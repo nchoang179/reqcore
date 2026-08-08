@@ -117,7 +117,7 @@ const planFeatures = computed(() => plan.value?.features.slice(0, 3) ?? [])
           <ArrowRight class="size-3.5 transition-transform group-hover:translate-x-0.5" />
         </NuxtLink>
         <NuxtLink
-          :to="$localePath('/pricing')"
+          :to="$localePath('/dashboard/settings/billing')"
           class="text-sm text-surface-400 transition-colors hover:text-surface-700 dark:text-surface-500 dark:hover:text-surface-300 no-underline"
         >
           Compare all plans

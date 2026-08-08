@@ -44,4 +44,19 @@ describe('demo account organization isolation', () => {
     expect(read('server/api/notification-preferences/index.get.ts')).toMatch(/isDemoAccountEmail\(session\.user\.email\)/)
     expect(read('server/api/notification-preferences/index.patch.ts')).toMatch(/isDemoAccountEmail\(session\.user\.email\)/)
   })
+
+  it('opens the account upsell before the demo account can write in chat', () => {
+    const chatPage = read('app/pages/dashboard/chatbot/[[id]].vue')
+
+    expect(chatPage).toMatch(/@beforeinput="handleDemoChatAttempt"/)
+    expect(chatPage).toMatch(/if \(handleDemoChatAttempt\(\)\) return/)
+    expect(chatPage).toMatch(/Create your own account to start a private workspace/)
+  })
+
+  it('directs read-only demo users to create an account instead of self-hosting', () => {
+    const previewError = read('server/utils/previewReadOnly.ts')
+
+    expect(previewError).toMatch(/Create your own account/)
+    expect(previewError).not.toMatch(/self-host/i)
+  })
 })

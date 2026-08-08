@@ -46,10 +46,10 @@ interface ProviderInfo {
   models: { id: string, label: string, description: string, inputPricePer1m?: number, outputPricePer1m?: number, badge?: 'recommended' | 'fast' | 'powerful' | 'cheap' }[]
 }
 
-const { allowed: canManageAi, isLoading: isPermissionLoading } = usePermission({ scoring: ['create'] })
+const { allowed: canManageAi, isLoading: isPermissionLoading } = usePermission({ aiConfig: ['update'] })
 const toast = useToast()
 
-// Bring-your-own AI key (adding a model) is available on every plan.
+// Bring-your-own AI key (adding a model) is Solo and above.
 const { hasFeature } = usePlanFeature()
 const canUseByok = computed(() => hasFeature('byok'))
 const canAddModel = computed(() => canManageAi.value && canUseByok.value)
@@ -208,7 +208,8 @@ function statusClass(c: AiConfigRow): string {
       </NuxtLink>
     </div>
 
-    <!-- Kept as a defensive server/UI mismatch fallback; BYOK should be available on every plan. -->
+    <!-- Free orgs: BYOK is a Solo-and-above capability. Any config they already
+         have still renders below and keeps working; this only sells adding one. -->
     <FeatureLockCard v-if="canManageAi && !canUseByok" feature="byok" class="mb-6" />
 
     <!-- Permission guard -->

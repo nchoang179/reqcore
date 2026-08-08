@@ -11,24 +11,24 @@ import { createAiConfigSchema, updateAiConfigSchema } from '../../server/utils/s
  * existing stored key when only metadata changes.
  */
 describe('createAiConfigSchema', () => {
-  it('accepts openai_compatible provider with baseUrl', () => {
+  it('accepts openai_compatible provider with a public HTTPS baseUrl', () => {
     const result = createAiConfigSchema.safeParse({
       name: 'Local Llama',
       provider: 'openai_compatible',
       model: 'llama-3.1-8b',
       apiKey: 'test-key',
-      baseUrl: 'http://localhost:11434/v1',
+      baseUrl: 'https://inference.example.com/v1',
       maxTokens: 4096,
     })
 
     expect(result.success).toBe(true)
     if (result.success) {
-      expect(result.data.baseUrl).toBe('http://localhost:11434/v1')
+      expect(result.data.baseUrl).toBe('https://inference.example.com/v1')
       expect(result.data.maxTokens).toBe(4096)
     }
   })
 
-  it('accepts openai_compatible without baseUrl', () => {
+  it('rejects openai_compatible without baseUrl', () => {
     const result = createAiConfigSchema.safeParse({
       name: 'Custom',
       provider: 'openai_compatible',
@@ -36,13 +36,7 @@ describe('createAiConfigSchema', () => {
       apiKey: 'test-key',
     })
 
-    expect(result.success).toBe(true)
-    if (result.success) {
-      // baseUrl is nullish — when omitted, the parsed value stays undefined
-      expect(result.data.baseUrl).toBeUndefined()
-      // maxTokens defaults to 16384 when omitted
-      expect(result.data.maxTokens).toBe(16384)
-    }
+    expect(result.success).toBe(false)
   })
 
   it('accepts standard openai provider', () => {
@@ -104,6 +98,35 @@ describe('createAiConfigSchema', () => {
     })
 
     expect(result.success).toBe(false)
+  })
+
+  it.each([
+    'http://api.example.com/v1',
+    'https://127.0.0.1/v1',
+    'https://10.0.0.5/v1',
+    'https://172.16.0.1/v1',
+    'https://192.168.1.1/v1',
+    'https://[::1]/v1',
+    'https://[fe80::1]/v1',
+    'https://[fc00::1]/v1',
+  ])('rejects non-HTTPS or non-public endpoint %s', (baseUrl) => {
+    expect(createAiConfigSchema.safeParse({
+      name: 'unsafe',
+      provider: 'openai_compatible',
+      model: 'test',
+      apiKey: 'test',
+      baseUrl,
+    }).success).toBe(false)
+  })
+
+  it('rejects custom base URLs for first-party providers', () => {
+    expect(createAiConfigSchema.safeParse({
+      name: 'OpenAI override',
+      provider: 'openai',
+      model: 'gpt-4.1-mini',
+      apiKey: 'test',
+      baseUrl: 'https://api.example.com/v1',
+    }).success).toBe(false)
   })
 
   it('requires name (used by INSERT in index.post.ts)', () => {

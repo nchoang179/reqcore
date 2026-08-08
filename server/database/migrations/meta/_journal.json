@@ -421,6 +421,41 @@
       "when": 1785262777727,
       "tag": "0059_auto_score_on_apply_default_true",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1786111908440,
+      "tag": "0060_happy_wolfpack",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1786124321802,
+      "tag": "0061_shallow_marrow",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1786169572844,
+      "tag": "0062_confused_the_liberteens",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1786170689714,
+      "tag": "0063_sleepy_king_bedlam",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1786172147789,
+      "tag": "0064_bumpy_the_order",
+      "breakpoints": true
     }
   ]
 }

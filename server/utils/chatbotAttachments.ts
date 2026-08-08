@@ -11,6 +11,11 @@
  * Cleared via TTL eviction or on logout (best-effort).
  */
 import type { ChatbotAttachment } from '../../shared/chatbot'
+import {
+  CHATBOT_MAX_STORED_ATTACHMENT_CHARS,
+  CHATBOT_MAX_STORED_BYTES_PER_ORG,
+  CHATBOT_MAX_STORED_BYTES_PER_USER,
+} from '../../shared/chatbot'
 
 interface StoredAttachment extends ChatbotAttachment {
   userId: string
@@ -23,6 +28,13 @@ const TTL_MS = 30 * 60 * 1000 // 30 minutes
 const MAX_PER_USER = 20
 
 const store = new Map<string, StoredAttachment>()
+
+export class ChatbotAttachmentQuotaError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ChatbotAttachmentQuotaError'
+  }
+}
 
 function key(orgId: string, userId: string, attachmentId: string) {
   return `${orgId}:${userId}:${attachmentId}`
@@ -43,6 +55,9 @@ export function saveChatbotAttachment(input: {
 }): void {
   evictExpired()
 
+  const text = input.text.slice(0, CHATBOT_MAX_STORED_ATTACHMENT_CHARS)
+  const incomingBytes = Buffer.byteLength(text, 'utf8')
+
   // Enforce a per-(org,user) cap by evicting the oldest entries.
   const userEntries = Array.from(store.entries())
     .filter(([, v]) => v.userId === input.userId && v.orgId === input.orgId)
@@ -52,11 +67,26 @@ export function saveChatbotAttachment(input: {
     if (oldest) store.delete(oldest[0])
   }
 
+  const retained = Array.from(store.values())
+  const userBytes = retained
+    .filter(value => value.userId === input.userId && value.orgId === input.orgId)
+    .reduce((sum, value) => sum + Buffer.byteLength(value.text, 'utf8'), 0)
+  const orgBytes = retained
+    .filter(value => value.orgId === input.orgId)
+    .reduce((sum, value) => sum + Buffer.byteLength(value.text, 'utf8'), 0)
+  if (userBytes + incomingBytes > CHATBOT_MAX_STORED_BYTES_PER_USER) {
+    throw new ChatbotAttachmentQuotaError('Attachment text quota exceeded for this user. Remove or wait for older uploads to expire.')
+  }
+  if (orgBytes + incomingBytes > CHATBOT_MAX_STORED_BYTES_PER_ORG) {
+    throw new ChatbotAttachmentQuotaError('Attachment text quota exceeded for this organization. Wait for older uploads to expire.')
+  }
+
   store.set(key(input.orgId, input.userId, input.attachment.id), {
     ...input.attachment,
+    textLength: text.length,
     userId: input.userId,
     orgId: input.orgId,
-    text: input.text,
+    text,
     expiresAt: Date.now() + TTL_MS,
   })
 }

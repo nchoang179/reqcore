@@ -126,6 +126,7 @@ export function useInterviews(options?: {
   status?: MaybeRefOrGetter<string | undefined>
   from?: MaybeRefOrGetter<string | undefined>
   to?: MaybeRefOrGetter<string | undefined>
+  order?: MaybeRefOrGetter<'asc' | 'desc' | 'scheduled_first' | undefined>
   limit?: MaybeRefOrGetter<number | undefined>
 }) {
   const { handlePreviewReadOnlyError } = usePreviewReadOnly()
@@ -151,6 +152,10 @@ export function useInterviews(options?: {
     if (options?.to) {
       const v = toValue(options.to)
       if (v) q.to = v
+    }
+    if (options?.order) {
+      const v = toValue(options.order)
+      if (v) q.order = v
     }
     if (options?.limit) {
       const v = toValue(options.limit)

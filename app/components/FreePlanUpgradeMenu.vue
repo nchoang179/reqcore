@@ -8,7 +8,7 @@
  * so the upsell and the org's current limits are reachable from every page,
  * not just buried in settings.
  */
-import { Briefcase, ArrowRight, MessageSquare, Sparkles, Zap } from 'lucide-vue-next'
+import { Briefcase, ArrowRight, MessageCircle, MessageSquare, Sparkles, Zap } from 'lucide-vue-next'
 import { getBillingPlan } from '~~/shared/billing'
 import { freePlanUsage, useBillingStatus } from '~/composables/useBillingStatus'
 
@@ -23,7 +23,8 @@ const atLimit = computed(() => {
   if (!u) return false
   const hit = (m: { used: number, limit: number | null }) =>
     m.limit != null && Number.isFinite(m.limit) && m.used >= m.limit
-  return hit(u.activeRoles) || hit(u.aiAnalysis) || hit(u.candidateConversations)
+  return hit(u.activeRoles) || hit(u.aiAnalysis) || hit(u.aiAssistant)
+    || hit(u.candidateConversations)
 })
 
 const recommended = getBillingPlan('solo')!
@@ -75,6 +76,13 @@ watch(() => route.path, () => { open.value = false })
         <div class="space-y-4 px-4 py-4">
           <UsageMeterBar label="Active roles" :icon="Briefcase" :used="usage.activeRoles.used" :limit="usage.activeRoles.limit" />
           <UsageMeterBar label="AI shortlist runs" :icon="Zap" :used="usage.aiAnalysis.used" :limit="usage.aiAnalysis.limit" />
+          <UsageMeterBar
+            label="Assistant prompts"
+            :icon="MessageCircle"
+            :used="usage.aiAssistant.used"
+            :limit="usage.aiAssistant.limit"
+            :value-label="`${usage.aiAssistant.used} / ${usage.aiAssistant.limit} used`"
+          />
           <UsageMeterBar label="Candidate conversations" :icon="MessageSquare" :used="usage.candidateConversations.used" :limit="usage.candidateConversations.limit" />
         </div>
 

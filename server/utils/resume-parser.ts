@@ -10,6 +10,7 @@
  *   - DOC — via word-extractor (OLE2 compound documents)
  */
 import mammoth from 'mammoth'
+import { Worker } from 'node:worker_threads'
 // @ts-ignore — word-extractor has no bundled type declarations
 import WordExtractor from 'word-extractor'
 
@@ -37,7 +38,26 @@ function ensurePdfjsPolyfills() {
   }
 }
 
-const PARSER_VERSION = '1.0'
+const PARSER_VERSION = '1.1'
+export const DOCUMENT_MAX_EXTRACTED_CHARS = 100_000
+export const DOCUMENT_MAX_PDF_PAGES = 50
+export const DOCUMENT_PARSE_TIMEOUT_MS = 12_000
+export const DOCX_MAX_ENTRIES = 2_000
+export const DOCX_MAX_UNCOMPRESSED_BYTES = 24 * 1024 * 1024
+export const DOCX_MAX_EXPANSION_RATIO = 100
+
+export interface DocumentParseLimits {
+  maxCharacters?: number
+  maxPdfPages?: number
+  timeoutMs?: number
+}
+
+export class DocumentLimitError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'DocumentLimitError'
+  }
+}
 
 export interface ParsedResume {
   /** Full extracted text content */
@@ -156,9 +176,13 @@ async function parsePdf(buffer: Buffer): Promise<ParsedResume | null> {
   // are not resume content: on an image-only CV they are the *only* text, so the
   // document reads as non-empty, gets stored, and reaches the model as the
   // candidate's entire resume — which scores 0% with nothing logged anywhere.
-  const result = await parser.getText({ pageJoiner: '' })
+  const result = await parser.getText({ pageJoiner: '', first: DOCUMENT_MAX_PDF_PAGES + 1 })
+  if (result.total > DOCUMENT_MAX_PDF_PAGES) {
+    await parser.destroy()
+    throw new DocumentLimitError(`PDF exceeds the ${DOCUMENT_MAX_PDF_PAGES}-page limit.`)
+  }
 
-  const text = normalizeText(result.text)
+  const text = capExtractedText(normalizeText(result.text), DOCUMENT_MAX_EXTRACTED_CHARS)
   if (!text) {
     await parser.destroy()
     return null
@@ -184,9 +208,10 @@ async function parsePdf(buffer: Buffer): Promise<ParsedResume | null> {
 // ─── DOCX Parser ──────────────────────────────────────────────────
 
 async function parseDocx(buffer: Buffer): Promise<ParsedResume | null> {
+  assertSafeDocxArchive(buffer)
   const result = await mammoth.extractRawText({ buffer })
 
-  const text = normalizeText(result.value)
+  const text = capExtractedText(normalizeText(result.value), DOCUMENT_MAX_EXTRACTED_CHARS)
   if (!text) return null
 
   return {
@@ -217,7 +242,7 @@ async function parseDoc(buffer: Buffer): Promise<ParsedResume | null> {
   ].filter(Boolean)
 
   const rawText = parts.join('\n')
-  const text = normalizeText(rawText)
+  const text = capExtractedText(normalizeText(rawText), DOCUMENT_MAX_EXTRACTED_CHARS)
   if (!text) return null
 
   return {
@@ -257,6 +282,241 @@ function normalizeText(raw: string): string {
     .join('\n')
     // Final trim
     .trim()
+}
+
+function capExtractedText(text: string, maxCharacters: number): string {
+  return text.length <= maxCharacters ? text : text.slice(0, maxCharacters)
+}
+
+/**
+ * Reads only ZIP central-directory metadata; no entry is decompressed here.
+ * Mammoth/JSZip is invoked only after aggregate size and expansion ratio pass.
+ */
+export function assertSafeDocxArchive(buffer: Buffer): void {
+  const eocdSignature = 0x06054b50
+  const centralSignature = 0x02014b50
+  const minEocd = 22
+  const searchStart = Math.max(0, buffer.length - 65_557)
+  let eocd = -1
+  for (let offset = buffer.length - minEocd; offset >= searchStart; offset--) {
+    if (buffer.readUInt32LE(offset) === eocdSignature) {
+      eocd = offset
+      break
+    }
+  }
+  if (eocd < 0) throw new DocumentLimitError('DOCX archive is malformed.')
+
+  const declaredEntries = buffer.readUInt16LE(eocd + 10)
+  const centralSize = buffer.readUInt32LE(eocd + 12)
+  const centralOffset = buffer.readUInt32LE(eocd + 16)
+  if (declaredEntries === 0xffff || centralSize === 0xffffffff || centralOffset === 0xffffffff) {
+    throw new DocumentLimitError('ZIP64 DOCX archives are not accepted.')
+  }
+  if (declaredEntries > DOCX_MAX_ENTRIES || centralOffset + centralSize > buffer.length) {
+    throw new DocumentLimitError('DOCX archive exceeds safe structural limits.')
+  }
+
+  let entries = 0
+  let compressedTotal = 0
+  let uncompressedTotal = 0
+  let offset = centralOffset
+  const centralEnd = centralOffset + centralSize
+  while (offset < centralEnd) {
+    if (offset + 46 > buffer.length || buffer.readUInt32LE(offset) !== centralSignature) {
+      throw new DocumentLimitError('DOCX central directory is malformed.')
+    }
+    const compressed = buffer.readUInt32LE(offset + 20)
+    const uncompressed = buffer.readUInt32LE(offset + 24)
+    const filenameLength = buffer.readUInt16LE(offset + 28)
+    const extraLength = buffer.readUInt16LE(offset + 30)
+    const commentLength = buffer.readUInt16LE(offset + 32)
+    if (compressed === 0xffffffff || uncompressed === 0xffffffff) {
+      throw new DocumentLimitError('ZIP64 DOCX entries are not accepted.')
+    }
+    compressedTotal += compressed
+    uncompressedTotal += uncompressed
+    entries++
+    if (entries > DOCX_MAX_ENTRIES || uncompressedTotal > DOCX_MAX_UNCOMPRESSED_BYTES) {
+      throw new DocumentLimitError('DOCX expanded content exceeds the safe limit.')
+    }
+    offset += 46 + filenameLength + extraLength + commentLength
+  }
+  if (entries !== declaredEntries || offset !== centralEnd) {
+    throw new DocumentLimitError('DOCX central directory does not match its metadata.')
+  }
+  if (uncompressedTotal > 0 && uncompressedTotal / Math.max(1, compressedTotal) > DOCX_MAX_EXPANSION_RATIO) {
+    throw new DocumentLimitError('DOCX compression ratio exceeds the safe limit.')
+  }
+}
+
+const ISOLATED_PARSER_SOURCE = String.raw`
+const { parentPort, workerData } = require('node:worker_threads')
+
+function normalize(raw, maxCharacters) {
+  return raw
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+    .replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+    .replace(/\n{3,}/g, '\n\n').replace(/[^\S\n]+/g, ' ')
+    .split('\n').map(line => line.trim()).join('\n').trim()
+    .slice(0, maxCharacters)
+}
+
+function words(text) {
+  return text ? text.split(/\s+/).filter(Boolean).length : 0
+}
+
+async function run() {
+  const buffer = Buffer.from(workerData.data)
+  const { mimeType, maxCharacters, maxPdfPages } = workerData
+  let raw = ''
+  let pageCount = null
+  let sourceFormat
+
+  if (mimeType === 'application/pdf') {
+    if (typeof globalThis.DOMMatrix === 'undefined') globalThis.DOMMatrix = class DOMMatrix { constructor() { this.a=1;this.b=0;this.c=0;this.d=1;this.e=0;this.f=0 } }
+    if (typeof globalThis.ImageData === 'undefined') globalThis.ImageData = class ImageData { constructor(w,h) { this.width=w;this.height=h;this.data=new Uint8ClampedArray(w*h*4) } }
+    if (typeof globalThis.Path2D === 'undefined') globalThis.Path2D = class Path2D {}
+    const { PDFParse } = await import('pdf-parse')
+    const parser = new PDFParse({ data: buffer })
+    try {
+      const result = await parser.getText({ pageJoiner: '', first: maxPdfPages + 1 })
+      if (result.total > maxPdfPages) throw new Error('PDF_PAGE_LIMIT')
+      raw = result.text
+      pageCount = result.total
+      sourceFormat = 'pdf'
+    } finally {
+      await parser.destroy()
+    }
+  } else if (mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+    const mammoth = require('mammoth')
+    raw = (await mammoth.extractRawText({ buffer })).value
+    sourceFormat = 'docx'
+  } else if (mimeType === 'application/msword') {
+    const WordExtractor = require('word-extractor')
+    const doc = await new WordExtractor().extract(buffer)
+    raw = [doc.getBody(), doc.getHeaders({ includeFooters: false }), doc.getFooters()].filter(Boolean).join('\n')
+    sourceFormat = 'doc'
+  } else {
+    throw new Error('UNSUPPORTED_TYPE')
+  }
+
+  const text = normalize(raw, maxCharacters)
+  if (!text) return null
+  return {
+    text,
+    sections: [],
+    metadata: {
+      pageCount,
+      wordCount: words(text),
+      characterCount: text.length,
+      extractedAt: new Date().toISOString(),
+      parserVersion: '1.1',
+      sourceFormat,
+    },
+  }
+}
+
+run().then(parsed => parentPort.postMessage({ ok: true, parsed }), error => parentPort.postMessage({ ok: false, error: error && error.message ? error.message : String(error) }))
+`
+
+/**
+ * Parses untrusted uploads off the main event loop. Resource limits constrain
+ * decompression/parser memory and terminate stops work at the wall-clock cap.
+ */
+export async function parseDocumentIsolated(
+  buffer: Buffer,
+  mimeType: string,
+  limits: DocumentParseLimits = {},
+): Promise<ParsedResume | null> {
+  if (mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+    assertSafeDocxArchive(buffer)
+  }
+  const maxCharacters = Math.min(
+    DOCUMENT_MAX_EXTRACTED_CHARS,
+    Math.max(1, limits.maxCharacters ?? DOCUMENT_MAX_EXTRACTED_CHARS),
+  )
+  const maxPdfPages = Math.min(
+    DOCUMENT_MAX_PDF_PAGES,
+    Math.max(1, limits.maxPdfPages ?? DOCUMENT_MAX_PDF_PAGES),
+  )
+  const timeoutMs = Math.min(30_000, Math.max(1_000, limits.timeoutMs ?? DOCUMENT_PARSE_TIMEOUT_MS))
+  const data = Uint8Array.from(buffer).buffer as ArrayBuffer
+
+  return await new Promise<ParsedResume | null>((resolve, reject) => {
+    const worker = new Worker(ISOLATED_PARSER_SOURCE, {
+      eval: true,
+      workerData: { data, mimeType, maxCharacters, maxPdfPages },
+      transferList: [data],
+      resourceLimits: {
+        maxOldGenerationSizeMb: 128,
+        maxYoungGenerationSizeMb: 16,
+        stackSizeMb: 4,
+      },
+    })
+    let settled = false
+    const finish = (callback: () => void) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      callback()
+    }
+    const timer = setTimeout(() => {
+      void worker.terminate()
+      finish(() => reject(new DocumentLimitError('Document parsing timed out.')))
+    }, timeoutMs)
+    worker.once('message', (message: { ok: boolean, parsed?: ParsedResume | null, error?: string }) => {
+      void worker.terminate()
+      finish(() => {
+        if (message.ok) resolve(message.parsed ?? null)
+        else reject(new DocumentLimitError(
+          message.error === 'PDF_PAGE_LIMIT'
+            ? `PDF exceeds the ${maxPdfPages}-page limit.`
+            : 'Document could not be parsed within safe limits.',
+        ))
+      })
+    })
+    worker.once('error', (error) => finish(() => reject(new DocumentLimitError(
+      `Document parser failed: ${error instanceof Error ? error.message : String(error)}`,
+    ))))
+    worker.once('exit', (code) => {
+      if (code !== 0) finish(() => reject(new DocumentLimitError('Document parser exceeded its resource limit.')))
+    })
+  })
+}
+
+export async function parseDocumentDetailedIsolated(
+  buffer: Buffer,
+  mimeType: string,
+  limits: DocumentParseLimits = {},
+): Promise<DocumentParseResult> {
+  if (![
+    'application/pdf',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/msword',
+  ].includes(mimeType)) {
+    return { ok: false, reason: 'unsupported_type' }
+  }
+  try {
+    const parsed = await parseDocumentIsolated(buffer, mimeType, limits)
+    return parsed ? { ok: true, parsed } : { ok: false, reason: 'empty' }
+  }
+  catch (error) {
+    logError('resume_parser.isolated_parse_failed', {
+      mime_type: mimeType,
+      error_message: error instanceof Error ? error.message : String(error),
+    })
+    return { ok: false, reason: 'failed' }
+  }
+}
+
+/** Best-effort isolated parsing for upload flows that may retain the file even when text extraction fails. */
+export async function parseDocumentSafelyIsolated(
+  buffer: Buffer,
+  mimeType: string,
+  limits: DocumentParseLimits = {},
+): Promise<ParsedResume | null> {
+  const result = await parseDocumentDetailedIsolated(buffer, mimeType, limits)
+  return result.ok ? result.parsed : null
 }
 
 // ─── Section Extraction ───────────────────────────────────────────

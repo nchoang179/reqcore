@@ -1,0 +1,1 @@
+ALTER TABLE "chatbot_conversation" ADD COLUMN "chatbot_model" text;

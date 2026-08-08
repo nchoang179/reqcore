@@ -100,8 +100,6 @@ const { data: feedbackConfig } = useFetch('/api/feedback/config', {
 
 const isFeedbackEnabled = computed(() => feedbackConfig.value?.enabled === true)
 
-const showChatbot = useFeatureFlagEnabled('chatbot-experience')
-
 const jobTabs = computed(() => {
   if (!activeJobId.value) return []
   const base = `/dashboard/jobs/${activeJobId.value}`
@@ -123,13 +121,14 @@ const jobTabs = computed(() => {
 // Main navigation
 // ─────────────────────────────────────────────
 
-const mainNav: Array<{ label: string; to: string; icon: typeof Briefcase; exact: boolean; comingSoon?: boolean; feature?: PlanFeature }> = [
+const navItems: Array<{ label: string; to: string; icon: typeof Briefcase; exact: boolean; comingSoon?: boolean; feature?: PlanFeature }> = [
   { label: 'Dashboard', to: '/dashboard', icon: LayoutDashboard, exact: true },
   { label: 'Jobs', to: '/dashboard/jobs', icon: Briefcase, exact: false },
   { label: 'Candidates', to: '/dashboard/candidates', icon: Users, exact: false },
   { label: 'Applications', to: '/dashboard/applications', icon: FileText, exact: false },
   { label: 'Inbox', to: '/dashboard/inbox', icon: Inbox, exact: true, feature: 'candidateMessaging' },
   { label: 'Interviews', to: '/dashboard/interviews', icon: Calendar, exact: false },
+  { label: 'Assistant', to: '/dashboard/chatbot', icon: MessageCircle, exact: false, feature: 'chatbot' },
   { label: 'Timeline', to: '/dashboard/timeline', icon: History, exact: true, feature: 'activityTimeline' },
   { label: 'Source Tracking', to: '/dashboard/source-tracking', icon: Radio, exact: true, feature: 'sourceAnalytics' },
   { label: 'AI Analysis', to: '/dashboard/ai-analysis', icon: Sparkles, exact: true, feature: 'aiAnalytics' },
@@ -143,37 +142,15 @@ function isNavLocked(item: { feature?: PlanFeature }): boolean {
   return item.feature != null && !hasFeature(item.feature)
 }
 
-// Items shown only when their feature flag is enabled. Filtered into mainNav
-// reactively so the gating happens at render time (PostHog flags load async).
-const flaggedNav = computed(() => {
-  const items: Array<{ label: string; to: string; icon: typeof Briefcase; exact: boolean; afterLabel: string }> = []
-  if (showChatbot.value) {
-    items.push({ label: 'Assistant', to: '/dashboard/chatbot', icon: MessageCircle, exact: false, afterLabel: 'AI Analysis' })
-  }
-  return items
-})
-
-const navItems = computed(() => {
-  const merged = [...mainNav]
-  for (const item of flaggedNav.value) {
-    const idx = merged.findIndex((n) => n.label === item.afterLabel)
-    const insertAt = idx >= 0 ? idx + 1 : merged.length
-    merged.splice(insertAt, 0, {
-      label: item.label, to: item.to, icon: item.icon, exact: item.exact,
-    })
-  }
-  return merged
-})
-
 function isActiveRoute(to: string, exact: boolean) {
   const localizedTo = localePath(to)
   if (exact) return route.path === localizedTo
   return route.path === localizedTo || route.path.startsWith(`${localizedTo}/`)
 }
 
-const primaryNavLabels = ['Dashboard', 'Jobs', 'Candidates', 'Applications', 'Inbox', 'Interviews', 'Settings']
-const primaryNavItems = computed(() => navItems.value.filter(i => primaryNavLabels.includes(i.label)))
-const moreNavItems = computed(() => navItems.value.filter(i => !primaryNavLabels.includes(i.label)))
+const primaryNavLabels = ['Dashboard', 'Jobs', 'Candidates', 'Applications', 'Inbox', 'Interviews', 'Assistant', 'Settings']
+const primaryNavItems = computed(() => navItems.filter(i => primaryNavLabels.includes(i.label)))
+const moreNavItems = computed(() => navItems.filter(i => !primaryNavLabels.includes(i.label)))
 
 // Close menus on route change
 watch(() => route.path, () => {

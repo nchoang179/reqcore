@@ -13,6 +13,12 @@ const props = defineProps<{
   used: number
   /** null/∞ means uncapped on this tier. */
   limit: number | null
+  /**
+   * Replaces the "used / limit" readout. The assistant meter is a percentage
+   * rather than a count — showing "40 / 100" there would read as a message
+   * tally, which it isn't.
+   */
+  valueLabel?: string
 }>()
 
 type Tone = 'ok' | 'near' | 'full'
@@ -48,7 +54,7 @@ const valueClass: Record<Tone, string> = {
         {{ label }}
       </span>
       <span class="text-sm font-semibold tabular-nums" :class="valueClass[view.tone]">
-        {{ used }} / {{ view.limitLabel }}
+        {{ valueLabel ?? `${used} / ${view.limitLabel}` }}
       </span>
     </div>
     <div class="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-surface-200 dark:bg-surface-800">

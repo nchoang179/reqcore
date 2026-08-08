@@ -89,12 +89,11 @@ export function extractChatbotSources(toolName: string, output: unknown): Chatbo
           const id = asString(c.id)
           const name = asString(c.name)
           if (!id || !name) return null
-          const email = asString(c.email)
           return {
             id: `candidate:${id}`,
             kind: 'candidate',
             label: name,
-            detail: email ?? 'Candidate',
+            detail: 'Candidate',
             entityId: id,
           }
         }).filter((s): s is ChatbotSource => s !== null)
@@ -106,12 +105,11 @@ export function extractChatbotSources(toolName: string, output: unknown): Chatbo
         const id = asString(c.id)
         const name = asString(c.name)
         if (!id || !name) return []
-        const email = asString(c.email)
         return [{
           id: `candidate:${id}`,
           kind: 'candidate',
           label: name,
-          detail: email ?? 'Candidate',
+          detail: 'Candidate',
           entityId: id,
         }]
       }

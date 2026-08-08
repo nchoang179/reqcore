@@ -1,6 +1,6 @@
 import { fileTypeFromBuffer } from 'file-type'
 import { ALLOWED_MIME_TYPES, MAX_FILE_SIZE } from '../../utils/schemas/document'
-import { parseDocumentDetailed } from '../../utils/resume-parser'
+import { parseDocumentDetailedIsolated } from '../../utils/resume-parser'
 import { resolveAnalysisProvider } from '../../utils/ai/resolveProvider'
 import { assertPlatformBudget, BudgetExceededError, budgetErrorToHttp } from '../../utils/ai/budget'
 import { computeCostUsdMicros } from '../../utils/ai/pricing'
@@ -78,7 +78,7 @@ export default defineEventHandler(async (event) => {
   // 2. Extract text
   // ─────────────────────────────────────────────
 
-  const parseResult = await parseDocumentDetailed(fileBuffer, mimeType)
+  const parseResult = await parseDocumentDetailedIsolated(fileBuffer, mimeType)
 
   // A parser crash is our problem, not the recruiter's — say so, and use a 5xx
   // so it doesn't get filed away as "another scanned CV".

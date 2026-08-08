@@ -15,7 +15,7 @@ export default defineEventHandler(async (event) => {
   const session = await requirePermission(event, { sourceTracking: ['read'], application: ['read'] })
   const orgId = session.session.activeOrganizationId
 
-  // Source attribution dashboard is a Team+ entitlement (tracking links
+  // Source attribution dashboard is a Solo+ entitlement (tracking links
   // themselves stay available on every plan; only the analytics view is gated).
   await assertPlanFeature(orgId, 'sourceAnalytics')
 

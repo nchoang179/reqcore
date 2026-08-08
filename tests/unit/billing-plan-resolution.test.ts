@@ -155,8 +155,14 @@ describe('tierHasFeature', () => {
     }
   })
 
-  it('gates source / timeline / AI analytics dashboards at Team+', () => {
-    for (const feature of ['sourceAnalytics', 'activityTimeline', 'aiAnalytics'] as const) {
+  it('gates source analytics at Solo+', () => {
+    expect(tierHasFeature('free', 'sourceAnalytics')).toBe(false)
+    expect(tierHasFeature('solo', 'sourceAnalytics')).toBe(true)
+    expect(tierHasFeature('team', 'sourceAnalytics')).toBe(true)
+  })
+
+  it('gates timeline / AI analytics dashboards at Team+', () => {
+    for (const feature of ['activityTimeline', 'aiAnalytics'] as const) {
       expect(tierHasFeature('solo', feature)).toBe(false)
       expect(tierHasFeature('team', feature)).toBe(true)
     }
@@ -170,9 +176,18 @@ describe('tierHasFeature', () => {
     }
   })
 
-  it('allows BYOK on every plan', () => {
-    for (const tier of ['free', 'solo', 'team', 'grandfathered', 'scale', 'agency'] as const) {
+  it('gates BYOK at Solo+, keeping it for grandfathered orgs', () => {
+    // Free can't bring its own key — that would be the uncapped assistant and
+    // uncapped shortlists for nothing, which is what Solo sells.
+    expect(tierHasFeature('free', 'byok')).toBe(false)
+    for (const tier of ['solo', 'team', 'grandfathered', 'scale', 'agency'] as const) {
       expect(tierHasFeature(tier, 'byok')).toBe(true)
+    }
+  })
+
+  it('allows the assistant on every plan (Free is metered by turn count)', () => {
+    for (const tier of ['free', 'solo', 'team', 'grandfathered', 'scale', 'agency'] as const) {
+      expect(tierHasFeature(tier, 'chatbot')).toBe(true)
     }
   })
 
@@ -200,7 +215,7 @@ describe('tierHasFeature', () => {
 
 describe('assertTierFeature', () => {
   it('passes silently when the tier is entitled', () => {
-    expect(() => assertTierFeature('free', 'byok')).not.toThrow()
+    expect(() => assertTierFeature('solo', 'byok')).not.toThrow()
   })
 
   it('throws a 402 with a machine-readable code + required tier when not entitled', () => {
@@ -250,20 +265,24 @@ describe('assertPlanFeature', () => {
     await expect(assertPlanFeature('org_1', 'interviews')).resolves.toBe('free')
   })
 
-  it('fails open (returns scale) when Stripe is unconfigured in dev/CI', async () => {
-    vi.unstubAllEnvs()
-    vi.stubEnv('NODE_ENV', 'development') // dev convenience: unlock everything
+  it('unlocks plan features when Stripe is intentionally disabled', async () => {
+    for (const key of [
+      'STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET',
+      'STRIPE_PRICE_SOLO_MONTHLY', 'STRIPE_PRICE_SOLO_ANNUAL',
+      'STRIPE_PRICE_TEAM_MONTHLY', 'STRIPE_PRICE_TEAM_ANNUAL',
+      'STRIPE_PRICE_SCALE_MONTHLY', 'STRIPE_PRICE_SCALE_ANNUAL',
+    ]) {
+      vi.stubEnv(key, '')
+    }
+    vi.stubEnv('NODE_ENV', 'production')
     stubDb([])
     await expect(assertPlanFeature('org_1', 'sso')).resolves.toBe('scale')
+    expect(whereCalls).not.toContain(subscription)
   })
 
-  it('fails closed when Stripe is unconfigured in production (drift), enforcing by stored tier', async () => {
-    // Stripe is always configured on the hosted SaaS; a missing var in production
-    // is drift, not a valid state. Must enforce, never unlock.
+  it('fails closed for a partial Stripe configuration', async () => {
     vi.stubEnv('STRIPE_WEBHOOK_SECRET', '')
     vi.stubEnv('NODE_ENV', 'production')
-    vi.stubEnv('CI', '')
-    vi.stubEnv('GITHUB_ACTIONS', '')
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
     stubDb([]) // free org → paid feature must be denied despite the misconfig
     await expect(assertPlanFeature('org_1', 'sso')).rejects.toMatchObject({ statusCode: 402 })

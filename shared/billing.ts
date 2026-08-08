@@ -82,6 +82,16 @@ export const FREE_PLAN_ANALYSIS_LIMIT = 50
 export const FREE_PLAN_CANDIDATE_CONVERSATION_LIMIT = 5
 
 /**
+ * Lifetime assistant-prompt allowance for a hosted Free workspace.
+ *
+ * Every submitted prompt consumes exactly one slot regardless of its token
+ * length, tool calls, or answer length. Paid plans keep their monthly credit
+ * allowance. Override the hosted Free limit with
+ * AI_FREE_PLAN_CHATBOT_TURN_LIMIT.
+ */
+export const FREE_PLAN_CHATBOT_PROMPT_LIMIT = 20
+
+/**
  * Paid, self-serve plans. Mirrors the marketing pricing page (pricing-v5). Free
  * needs no checkout; Agency is contact-sales, so neither appears here.
  */
@@ -97,9 +107,11 @@ export const BILLING_PLANS: BillingPlan[] = [
       'Up to 2 active roles',
       'Unlimited applicants and hires per role',
       'Unlimited AI shortlists on every role',
+      'AI assistant — chat with your pipeline',
       'Bring your own AI key (BYOK)',
       'Full shortlist workflow',
       'Branded career page for your open roles',
+      'Source analytics dashboard',
       'Two-way candidate messaging inbox',
       'Invite your whole team. No per-seat fees.',
       'Share and export shortlists',
@@ -175,13 +187,14 @@ export type PlanFeature =
   | 'candidateMessaging' // Readable inbox on every plan; Free outbound is count-limited
   | 'careerPage' // Branded per-org career page — available on every plan
   | 'calendar' // Calendar (Google) sync on interviews — Team and above
-  | 'sourceAnalytics' // Source attribution dashboard — Team and above
+  | 'sourceAnalytics' // Source attribution dashboard — Solo and above
   | 'activityTimeline' // Org-wide activity timeline — Team and above
   | 'aiAnalytics' // AI Analysis dashboard (provider health, scoring volume) — Team and above
   | 'sso' // SSO / SAML / SCIM provider registration — Scale and above
   | 'auditLog' // The org-wide audit log — Scale and above
   | 'retention' // Data-retention policy controls — Scale and above
-  | 'byok' // Bring-your-own AI key configuration — available on every plan
+  | 'byok' // Bring-your-own AI key configuration — Solo and above
+  | 'chatbot' // The AI assistant (chatbot) — every plan; Free is turn-limited
 
 /** Tiers ordered cheapest → most capable. A tier is entitled to a feature when
  *  its rank is ≥ the feature's minimum tier rank. */
@@ -210,13 +223,20 @@ export const FEATURE_MIN_TIER: Record<PlanFeature, BillingTier> = {
   candidateMessaging: 'free',
   careerPage: 'free',
   calendar: 'team',
-  sourceAnalytics: 'team',
+  sourceAnalytics: 'solo',
   activityTimeline: 'team',
   aiAnalytics: 'team',
   sso: 'scale',
   auditLog: 'scale',
   retention: 'scale',
-  byok: 'free',
+  // BYOK is a paid capability, not a free escape hatch. A free org that brings
+  // its own key would get the uncapped assistant for nothing, which is exactly
+  // the upgrade this tier exists to sell. Grandfathered orgs outrank Solo here
+  // and keep BYOK — it is the only way they can run AI at all.
+  byok: 'solo',
+  // Available on every plan. Free is metered by a lifetime prompt count
+  // (FREE_PLAN_CHATBOT_PROMPT_LIMIT) rather than token usage.
+  chatbot: 'free',
 }
 
 /** Short, user-facing label for each feature, used in upgrade prompts. */
@@ -232,6 +252,7 @@ export const FEATURE_LABEL: Record<PlanFeature, string> = {
   auditLog: 'The audit log',
   retention: 'Retention controls',
   byok: 'Bring your own AI key',
+  chatbot: 'The AI assistant',
 }
 
 function tierRank(tier: BillingTier): number {

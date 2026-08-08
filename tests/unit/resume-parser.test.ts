@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { parseDocument, parseDocumentDetailed, extractResumeText, type ParsedResume } from '../../server/utils/resume-parser'
+import {
+  parseDocument,
+  parseDocumentDetailed,
+  parseDocumentIsolated,
+  extractResumeText,
+  type ParsedResume,
+} from '../../server/utils/resume-parser'
 
 /**
  * Create a minimal valid PDF containing the given text.
@@ -75,7 +81,7 @@ describe('resume-parser', () => {
       expect(result).not.toBeNull()
       expect(result!.text).toContain('John Doe')
       expect(result!.metadata.sourceFormat).toBe('pdf')
-      expect(result!.metadata.parserVersion).toBe('1.0')
+      expect(result!.metadata.parserVersion).toBe('1.1')
       expect(result!.metadata.wordCount).toBeGreaterThan(0)
       expect(result!.metadata.extractedAt).toBeTruthy()
       expect(result!.metadata.pageCount).toBe(1)
@@ -99,6 +105,17 @@ describe('resume-parser', () => {
       const buffer = Buffer.from('not a real doc')
       const result = await parseDocument(buffer, 'application/msword')
       expect(result).toBeNull()
+    })
+
+    it('caps text returned by the isolated parser', async () => {
+      const result = await parseDocumentIsolated(
+        createTestPdf('John Doe Software Engineer'),
+        'application/pdf',
+        { maxCharacters: 8 },
+      )
+
+      expect(result?.text).toBe('John Doe')
+      expect(result?.metadata.characterCount).toBe(8)
     })
   })
 

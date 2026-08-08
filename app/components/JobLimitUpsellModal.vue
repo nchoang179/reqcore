@@ -237,7 +237,7 @@ function closeModal() {
           </NuxtLink>
           <NuxtLink
             v-else
-            :to="$localePath('/pricing')"
+            :to="$localePath('/dashboard/settings/billing')"
             class="inline-flex items-center gap-1 text-xs text-surface-400 transition-colors hover:text-surface-700 dark:text-surface-500 dark:hover:text-surface-300"
             @click="closeModal"
           >

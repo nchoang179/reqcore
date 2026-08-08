@@ -23,13 +23,16 @@
  *
  * `db`, `deleteFromS3`, `logWarn`, `logInfo`, `logError` are Nitro auto-imports (globals).
  */
-import { and, eq, inArray, isNotNull, isNull, lte, or } from 'drizzle-orm'
+import { and, eq, inArray, isNotNull, isNull, lte, or, sql } from 'drizzle-orm'
 import {
   candidate,
   application,
   candidateConversation,
   candidateMessage,
   candidateMessageAttachment,
+  chatbotConversation,
+  chatbotMessage,
+  chatbotMessageEntityReference,
   document,
   interview,
   propertyValue,
@@ -78,6 +81,7 @@ export interface ErasureResult {
   comments: number
   properties: number
   activityLogs: number
+  chatbotMessages: number
   s3Failures: number
   /** True when the candidate was erased but its audit row could not be written. */
   auditFailed?: boolean
@@ -223,6 +227,43 @@ async function eraseOne(
     : []
   const interviewIds = interviews.map(row => row.id)
 
+  const chatbotReferenceScopes = [
+    and(
+      eq(chatbotMessageEntityReference.entityType, 'candidate'),
+      eq(chatbotMessageEntityReference.entityId, candidateId),
+    ),
+    ...(applicationIds.length > 0
+      ? [and(
+          eq(chatbotMessageEntityReference.entityType, 'application'),
+          inArray(chatbotMessageEntityReference.entityId, applicationIds),
+        )]
+      : []),
+    ...(documentIds.length > 0
+      ? [and(
+          eq(chatbotMessageEntityReference.entityType, 'document'),
+          inArray(chatbotMessageEntityReference.entityId, documentIds),
+        )]
+      : []),
+  ]
+  const chatbotReferences = await db.query.chatbotMessageEntityReference.findMany({
+    where: and(
+      eq(chatbotMessageEntityReference.organizationId, orgId),
+      chatbotReferenceScopes.length === 1 ? chatbotReferenceScopes[0]! : or(...chatbotReferenceScopes),
+    ),
+    columns: { messageId: true },
+  })
+  let chatbotMessageIds = [...new Set(chatbotReferences.map(row => row.messageId))]
+  let chatbotRows = chatbotMessageIds.length > 0
+    ? await db.query.chatbotMessage.findMany({
+        where: and(
+          eq(chatbotMessage.organizationId, orgId),
+          inArray(chatbotMessage.id, chatbotMessageIds),
+        ),
+        columns: { id: true, conversationId: true },
+      })
+    : []
+  let chatbotConversationIds = [...new Set(chatbotRows.map(row => row.conversationId))]
+
   const commentScope = applicationIds.length > 0
     ? or(
         and(eq(comment.targetType, 'candidate'), eq(comment.targetId, candidateId)),
@@ -266,6 +307,7 @@ async function eraseOne(
     comments: commentRows.length,
     properties: propertyRows.length,
     activityLogs: activityRows.length,
+    chatbotMessages: chatbotRows.length,
   }
 
   if (dryRun) {
@@ -320,6 +362,38 @@ async function eraseOne(
 
   try {
     await db.transaction(async (tx) => {
+      const lockTargets = [
+        `candidate:${candidateId}`,
+        ...applicationIds.map(id => `application:${id}`),
+        ...documentIds.map(id => `document:${id}`),
+      ].sort()
+      for (const target of lockTargets) {
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`chatbot-entity:${target}`}))`)
+      }
+
+      // Re-scan after taking the same locks used by chatbot persistence. A
+      // response that finished while S3 cleanup was running is now included;
+      // a later response waits, observes the deleted entity, and self-redacts.
+      const currentReferences = await tx.query.chatbotMessageEntityReference.findMany({
+        where: and(
+          eq(chatbotMessageEntityReference.organizationId, orgId),
+          chatbotReferenceScopes.length === 1 ? chatbotReferenceScopes[0]! : or(...chatbotReferenceScopes),
+        ),
+        columns: { messageId: true },
+      })
+      chatbotMessageIds = [...new Set(currentReferences.map(row => row.messageId))]
+      chatbotRows = chatbotMessageIds.length > 0
+        ? await tx.query.chatbotMessage.findMany({
+            where: and(
+              eq(chatbotMessage.organizationId, orgId),
+              inArray(chatbotMessage.id, chatbotMessageIds),
+            ),
+            columns: { id: true, conversationId: true },
+          })
+        : []
+      chatbotConversationIds = [...new Set(chatbotRows.map(row => row.conversationId))]
+      counts.chatbotMessages = chatbotRows.length
+
       await tx.delete(comment).where(
         and(eq(comment.organizationId, orgId), commentScope),
       )
@@ -329,6 +403,33 @@ async function eraseOne(
       await tx.delete(activityLog).where(
         and(eq(activityLog.organizationId, orgId), activityScope),
       )
+      if (chatbotMessageIds.length > 0) {
+        await tx.update(chatbotMessage)
+          .set({
+            content: '[Redacted because this message referenced erased candidate data.]',
+            reasoning: null,
+            toolCalls: null,
+            sources: null,
+            attachments: null,
+          })
+          .where(and(
+            eq(chatbotMessage.organizationId, orgId),
+            inArray(chatbotMessage.id, chatbotMessageIds),
+          ))
+        await tx.delete(chatbotMessageEntityReference).where(and(
+          eq(chatbotMessageEntityReference.organizationId, orgId),
+          inArray(chatbotMessageEntityReference.messageId, chatbotMessageIds),
+        ))
+      }
+      if (chatbotConversationIds.length > 0) {
+        // A cached preview can duplicate the redacted assistant content.
+        await tx.update(chatbotConversation)
+          .set({ lastMessagePreview: null, updatedAt: new Date() })
+          .where(and(
+            eq(chatbotConversation.organizationId, orgId),
+            inArray(chatbotConversation.id, chatbotConversationIds),
+          ))
+      }
       // Cascades application → responses / interviews / scores / analysis / source, and documents.
       const deleted = await tx.delete(candidate).where(
         and(eq(candidate.id, candidateId), eq(candidate.organizationId, orgId), purgeGuard),
@@ -397,5 +498,5 @@ async function writeAudit(
 export { writeAudit as recordRetentionAudit }
 
 function blank(candidateId: string, status: ErasureStatus): ErasureResult {
-  return { candidateId, status, documents: 0, comments: 0, properties: 0, activityLogs: 0, s3Failures: 0 }
+  return { candidateId, status, documents: 0, comments: 0, properties: 0, activityLogs: 0, chatbotMessages: 0, s3Failures: 0 }
 }

@@ -5,14 +5,24 @@
  * Both meters mirror gates enforced elsewhere:
  *  - activeRoles  → assertActiveRoleLimit (server/utils/billing/plan.ts)
  *  - aiAnalysis   → assertPlatformBudget free-tier count gate (server/utils/ai/budget.ts)
+ *  - aiAssistant  → assertChatbotAllowance prompt/credit gate (same file)
  *
- * `limit: null` means "no fixed cap on this tier" (e.g. paid AI is a $ budget,
- * agency roles are unlimited) and is JSON-safe, unlike Infinity.
+ * `limit: null` means "no fixed cap on this tier" (e.g. paid analysis is a $
+ * budget, agency roles are unlimited) and is JSON-safe, unlike Infinity.
+ *
+ * `aiAssistant` reports the exact prompt count on Free, where the public limit
+ * is count-based. Paid tiers still report only a credit percentage, keeping raw
+ * balances and the credit-to-cost rate private.
  */
 import { and, eq, ne, sql } from 'drizzle-orm'
 import { analysisRun, candidateMessage, job } from '../../database/schema'
 import { resolveOrgPlanId } from './plan'
-import { freeRunLimit } from '../ai/budget'
+import {
+  freeRunLimit,
+  getChatbotCreditUsage,
+  getFreeChatbotPromptUsage,
+} from '../ai/budget'
+import { creditPercentUsed } from '../ai/credits'
 import {
   activeRoleLimitForTier,
   FREE_PLAN_CANDIDATE_CONVERSATION_LIMIT,
@@ -29,6 +39,7 @@ export interface OrgUsage {
   tier: BillingTier
   activeRoles: UsageMeter
   aiAnalysis: UsageMeter
+  aiAssistant: UsageMeter
   candidateConversations: UsageMeter
 }
 
@@ -76,17 +87,21 @@ async function countStartedConversations(orgId: string): Promise<number> {
 }
 
 /**
- * Resolve an org's tier plus its usage against the count-based caps. The AI and
+ * Resolve an org's tier plus its usage against the plan caps. The analysis and
  * candidate-conversation meters only have a fixed limit on the free tier (paid
- * AI is a monthly $ budget; paid messaging is unlimited), so their `limit` is
- * null for any paid tier.
+ * analysis is a monthly $ budget; paid messaging is unlimited), so their `limit`
+ * is null for any paid tier. The assistant meter is populated on *every* tier,
+ * as a percentage — see the file header.
  */
 export async function getOrgUsage(orgId: string): Promise<OrgUsage> {
   const tier = await resolveOrgPlanId(orgId)
 
-  const [openJobs, aiRuns, conversations] = await Promise.all([
+  const [openJobs, aiRuns, assistantUsage, conversations] = await Promise.all([
     countOpenJobs(orgId),
     countPlatformRuns(orgId),
+    tier === 'free'
+      ? getFreeChatbotPromptUsage(orgId)
+      : getChatbotCreditUsage(orgId, tier),
     countStartedConversations(orgId),
   ])
 
@@ -102,6 +117,13 @@ export async function getOrgUsage(orgId: string): Promise<OrgUsage> {
       used: aiRuns,
       limit: tier === 'free' ? freeRunLimit() : null,
     },
+    aiAssistant: tier === 'free'
+      ? { used: assistantUsage.used, limit: assistantUsage.allowance }
+      : {
+          // Percentage of a paid credit allowance, never its raw balance.
+          used: creditPercentUsed(assistantUsage.used, assistantUsage.allowance),
+          limit: 100,
+        },
     candidateConversations: {
       used: conversations,
       limit: tier === 'free' ? FREE_PLAN_CANDIDATE_CONVERSATION_LIMIT : null,

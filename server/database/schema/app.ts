@@ -940,6 +940,12 @@ export const platformAiConfig = pgTable('platform_ai_config', {
   inputPricePer1m: numeric('input_price_per_1m', { precision: 10, scale: 4 }),
   outputPricePer1m: numeric('output_price_per_1m', { precision: 10, scale: 4 }),
   isDefaultAnalysis: boolean('is_default_analysis').notNull().default(true),
+  /**
+   * Whether the platform engine powers the assistant when the org has pinned no
+   * BYOK chatbot config. Defaults true so a Solo org that never opens Settings →
+   * AI still has a working assistant on our OpenRouter key.
+   */
+  isDefaultChatbot: boolean('is_default_chatbot').notNull().default(true),
   isEnabled: boolean('is_enabled').notNull().default(true),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
@@ -1067,6 +1073,58 @@ export const analysisRun = pgTable('analysis_run', {
   index('analysis_run_organization_id_idx').on(t.organizationId),
   index('analysis_run_application_id_idx').on(t.applicationId),
   index('analysis_run_created_at_idx').on(t.createdAt),
+]))
+
+/** Which product surface spent the tokens. */
+export const aiUsageFeatureEnum = pgEnum('ai_usage_feature', ['chatbot_message'])
+
+/**
+ * Spend ledger for platform-paid LLM calls that are NOT analysis runs.
+ *
+ * The budget gate (utils/ai/budget.ts) originally summed `analysisRun` alone,
+ * which worked while every platform-paid call scored an application. The
+ * assistant broke that assumption: its turns have no `applicationId` (a NOT NULL
+ * FK on analysisRun), so they cannot be recorded there, and spend the gate can't
+ * see is spend it can't cap. Every non-analysis platform call lands here instead
+ * and the gate sums both tables.
+ *
+ * BYOK turns are written too — it's the org's own bill, so it never counts
+ * against a cap, but the usage stays visible.
+ */
+export const aiUsageEvent = pgTable('ai_usage_event', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  organizationId: text('organization_id').notNull().references(() => organization.id, { onDelete: 'cascade' }),
+  userId: text('user_id').references(() => user.id, { onDelete: 'set null' }),
+  feature: aiUsageFeatureEnum('feature').notNull(),
+  provider: text('provider').notNull(),
+  model: text('model').notNull(),
+  promptTokens: integer('prompt_tokens'),
+  completionTokens: integer('completion_tokens'),
+  /** Frozen µ$ cost, same convention as analysisRun.costUsdMicros. */
+  costUsdMicros: integer('cost_usd_micros'),
+  /**
+   * Frozen credit charge for an assistant turn — the customer-facing unit, and
+   * what the chatbot allowance gate sums. Written at the same moment as
+   * costUsdMicros and never recomputed, so retuning the µ$-per-credit rate
+   * cannot restate anyone's past balance.
+   *
+   * Non-null for every chatbot turn: a row starts at the up-front estimate and
+   * is reconciled to actual when the stream ends. Null only on non-chatbot
+   * features, which are metered in dollars instead.
+   */
+  creditsCharged: integer('credits_charged'),
+  billingMode: analysisBillingModeEnum('billing_mode').notNull().default('byok'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+}, (t) => ([
+  // The budget gate's hot path: platform spend for one org since a timestamp.
+  index('ai_usage_event_org_billing_created_idx')
+    .on(t.organizationId, t.billingMode, t.createdAt),
+  // The global daily kill-switch scans across all orgs.
+  index('ai_usage_event_billing_created_idx').on(t.billingMode, t.createdAt),
+  // The chatbot credit gate: one org's turns since a timestamp, any billing
+  // mode (a free org's BYOK turns still spend its grant).
+  index('ai_usage_event_org_feature_created_idx')
+    .on(t.organizationId, t.feature, t.createdAt),
 ]))
 
 // ─────────────────────────────────────────────
@@ -1376,6 +1434,37 @@ export const chatbotAgent = pgTable('chatbot_agent', {
 ]))
 
 /**
+ * Per-user assistant preferences that outlive a single conversation.
+ *
+ * Separate from `chatbotConversation` because the two answer different
+ * questions: the conversation records what a *past* chat ran on, this records
+ * what the *next* one should start on. Folding the default into the newest
+ * conversation's pin would make an experiment on one chat silently redefine the
+ * default for every chat after it.
+ *
+ * A missing row means "no preference" and is equivalent to an all-null row, so
+ * nothing has to be seeded when a user first opens the assistant.
+ */
+export const chatbotPreference = pgTable('chatbot_preference', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  organizationId: text('organization_id').notNull().references(() => organization.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  /**
+   * Starred catalogue model (`shared/chatbot-models.ts`), used for new chats.
+   * Null means the org default. Unvalidated at the database layer: an id
+   * later retired from the catalogue is ignored on read rather than blocking
+   * the user's next chat.
+   */
+  defaultModel: text('default_model'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (t) => ([
+  // One row per user per org — the upsert target, and what keeps two concurrent
+  // stars from creating rival preference rows.
+  uniqueIndex('chatbot_preference_org_user_idx').on(t.organizationId, t.userId),
+]))
+
+/**
  * Folders for organising conversations in the sidebar. Per-user.
  */
 export const chatbotFolder = pgTable('chatbot_folder', {
@@ -1405,6 +1494,21 @@ export const chatbotConversation = pgTable('chatbot_conversation', {
   agentId: text('agent_id').references(() => chatbotAgent.id, { onDelete: 'set null' }),
   /** AI configuration last used for this conversation. Falls back to org chatbot default. */
   aiConfigId: text('ai_config_id').references(() => aiConfig.id, { onDelete: 'set null' }),
+  /**
+   * The platform ("Reqcore AI") engine is pinned to this conversation. It cannot
+   * live in `aiConfigId` — that column is a real FK to ai_config and the platform
+   * engine has no row there — so the choice needs its own flag. Mutually
+   * exclusive with aiConfigId; the API clears one when setting the other.
+   */
+  usePlatformAi: boolean('use_platform_ai').notNull().default(false),
+  /**
+   * Model picked from the assistant catalogue (`shared/chatbot-models.ts`).
+   * Only meaningful alongside `usePlatformAi` — a BYOK config supplies its own
+   * model. Null means the platform default. Stored unvalidated by the database:
+   * ids are checked on write, and an id later retired from the catalogue falls
+   * back to the default at send time rather than breaking an old conversation.
+   */
+  chatbotModel: text('chatbot_model'),
   /** Human-friendly title. Auto-generated from the first user message if absent. */
   title: text('title').notNull().default('New chat'),
   /** Scope at the time of last message: { kind: 'organization' } or { kind: 'job', jobId } */
@@ -1451,6 +1555,24 @@ export const chatbotAgentRelations = relations(chatbotAgent, ({ many }) => ({
   conversations: many(chatbotConversation),
 }))
 
+/**
+ * Normalized entity references derived from tool results. These make subject
+ * access and erasure deterministic without retaining raw tool output JSON.
+ */
+export const chatbotMessageEntityReference = pgTable('chatbot_message_entity_reference', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  messageId: text('message_id').notNull().references(() => chatbotMessage.id, { onDelete: 'cascade' }),
+  organizationId: text('organization_id').notNull().references(() => organization.id, { onDelete: 'cascade' }),
+  entityType: text('entity_type').notNull().$type<'job' | 'candidate' | 'application' | 'document' | 'attachment'>(),
+  entityId: text('entity_id').notNull(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+}, (t) => ([
+  uniqueIndex('chatbot_message_entity_reference_unique_idx')
+    .on(t.messageId, t.entityType, t.entityId),
+  index('chatbot_message_entity_reference_lookup_idx')
+    .on(t.organizationId, t.entityType, t.entityId),
+]))
+
 export const chatbotFolderRelations = relations(chatbotFolder, ({ many }) => ({
   conversations: many(chatbotConversation),
 }))
@@ -1464,8 +1586,16 @@ export const chatbotConversationRelations = relations(chatbotConversation, ({ on
   messages: many(chatbotMessage),
 }))
 
-export const chatbotMessageRelations = relations(chatbotMessage, ({ one }) => ({
+export const chatbotMessageRelations = relations(chatbotMessage, ({ one, many }) => ({
   conversation: one(chatbotConversation, { fields: [chatbotMessage.conversationId], references: [chatbotConversation.id] }),
+  entityReferences: many(chatbotMessageEntityReference),
+}))
+
+export const chatbotMessageEntityReferenceRelations = relations(chatbotMessageEntityReference, ({ one }) => ({
+  message: one(chatbotMessage, {
+    fields: [chatbotMessageEntityReference.messageId],
+    references: [chatbotMessage.id],
+  }),
 }))
 
 // ─────────────────────────────────────────────

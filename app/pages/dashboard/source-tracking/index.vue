@@ -49,7 +49,7 @@ const dateFrom = computed(() => {
 // Fetch data
 // ─────────────────────────────────────────────
 
-// The source-attribution dashboard is a Team+ entitlement (mirrors the server
+// The source-attribution dashboard is a Solo+ entitlement (mirrors the server
 // gate on /api/source-tracking/stats). Tracking links themselves stay on every
 // plan, so only the analytics view below is gated.
 const { hasFeature, status: billingStatus } = usePlanFeature()
@@ -329,7 +329,7 @@ const showTab = ref<'overview' | 'links' | 'table'>(initialTab)
 
 <template>
   <div class="mx-auto max-w-6xl">
-    <!-- ─── Plan gate (Team+) ─── -->
+    <!-- ─── Plan gate (Solo+) ─── -->
     <div v-if="analyticsLocked">
       <div class="mb-8">
         <h1 class="text-2xl font-bold tracking-tight text-surface-900 dark:text-surface-50">

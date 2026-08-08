@@ -16,6 +16,7 @@ interface MockOpts {
   comments?: unknown[]
   properties?: unknown[]
   activityLogs?: unknown[]
+  chatbotMessages?: Array<{ id: string, conversationId: string }>
   /** Retention fields returned by the candidate findFirst (for purge-guard tests). */
   quarantinedAt?: Date | null
   scheduledPurgeAt?: Date | null
@@ -34,7 +35,24 @@ function makeDb(opts: MockOpts) {
       returning: vi.fn(() => Promise.resolve(deletedRows)),
     })),
   }))
-  const transaction = vi.fn(async (cb: (tx: unknown) => unknown) => cb({ delete: txDelete }))
+  const txUpdateWhere = vi.fn(() => Promise.resolve())
+  const txUpdateSet = vi.fn(() => ({ where: txUpdateWhere }))
+  const txUpdate = vi.fn(() => ({ set: txUpdateSet }))
+  const txQuery = {
+    chatbotMessageEntityReference: {
+      findMany: vi.fn(async () => (opts.chatbotMessages ?? []).map(row => ({ messageId: row.id }))),
+    },
+    chatbotMessage: {
+      findMany: vi.fn(async () => opts.chatbotMessages ?? []),
+    },
+  }
+  const txExecute = vi.fn(async () => {})
+  const transaction = vi.fn(async (cb: (tx: unknown) => unknown) => cb({
+    delete: txDelete,
+    update: txUpdate,
+    query: txQuery,
+    execute: txExecute,
+  }))
   const insert = vi.fn(() => ({
     values: vi.fn((v: Record<string, unknown>) => { inserts.push(v); return Promise.resolve() }),
   }))
@@ -63,6 +81,12 @@ function makeDb(opts: MockOpts) {
         findMany: vi.fn(async () => (opts.messageAttachments ?? []).map(storageKey => ({ storageKey }))),
       },
       interview: { findMany: vi.fn(async () => (opts.interviews ?? []).map(id => ({ id }))) },
+      chatbotMessageEntityReference: {
+        findMany: vi.fn(async () => (opts.chatbotMessages ?? []).map(row => ({ messageId: row.id }))),
+      },
+      chatbotMessage: {
+        findMany: vi.fn(async () => opts.chatbotMessages ?? []),
+      },
     },
     select: vi.fn(() => ({
       from: vi.fn(() => ({ where: vi.fn(() => Promise.resolve(selectResults[selectIdx++])) })),
@@ -70,7 +94,7 @@ function makeDb(opts: MockOpts) {
     transaction,
     insert,
   }
-  return { db, transaction, txDelete, insert, inserts }
+  return { db, transaction, txDelete, txUpdate, txUpdateSet, txUpdateWhere, txExecute, insert, inserts }
 }
 
 let deleteFromS3: ReturnType<typeof vi.fn>
@@ -152,6 +176,26 @@ describe('eraseCandidates', () => {
     expect(m.transaction).not.toHaveBeenCalled()
     // A 'partial' audit row is still written.
     expect(m.inserts[0]?.result).toBe('partial')
+  })
+
+  it('redacts chatbot messages that copied candidate data', async () => {
+    const m = makeDb({
+      candidateExists: true,
+      chatbotMessages: [{ id: 'chat-message-1', conversationId: 'chat-conversation-1' }],
+    })
+    vi.stubGlobal('db', m.db)
+
+    const report = await eraseCandidates('org1', ['c1'], {})
+
+    expect(report.results[0].chatbotMessages).toBe(1)
+    expect(m.txUpdate).toHaveBeenCalledTimes(2)
+    expect(m.txUpdateSet).toHaveBeenCalledWith(expect.objectContaining({
+      content: expect.stringMatching(/Redacted/),
+      reasoning: null,
+      toolCalls: null,
+      sources: null,
+    }))
+    expect(m.txUpdateSet).toHaveBeenCalledWith(expect.objectContaining({ lastMessagePreview: null }))
   })
 
   it('writes a privacy-safe audit row containing NO candidate PII', async () => {

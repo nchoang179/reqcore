@@ -1,7 +1,6 @@
 /** Durable notification outbox dispatch with leases, retries, and digest grouping. */
 import { and, asc, eq, gt, inArray, lte, sql } from 'drizzle-orm'
 import { emailSuppression, notificationOutbox } from '../../database/schema/app'
-import { isServerFeatureEnabled } from '../featureFlags'
 import { sendNotificationEmail } from '../email'
 import { renderDigest, renderNotification } from './templates'
 import { applicationUrl, dashboardUrl, inboxConversationUrl, interviewUrl } from './urls'

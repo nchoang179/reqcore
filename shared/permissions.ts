@@ -39,6 +39,7 @@ const atsStatements = {
   candidateMessage: ['create', 'read', 'update'],
   activityLog: ['read'],
   scoring: ['create', 'read', 'update', 'delete'],
+  aiConfig: ['create', 'read', 'update', 'delete'],
   sourceTracking: ['create', 'read', 'update', 'delete'],
 } as const
 
@@ -70,6 +71,7 @@ export const owner = ac.newRole({
   candidateMessage: ['create', 'read', 'update'],
   activityLog: ['read'],
   scoring: ['create', 'read', 'update', 'delete'],
+  aiConfig: ['create', 'read', 'update', 'delete'],
   sourceTracking: ['create', 'read', 'update', 'delete'],
 })
 
@@ -86,6 +88,7 @@ export const admin = ac.newRole({
   candidateMessage: ['create', 'read', 'update'],
   activityLog: ['read'],
   scoring: ['create', 'read', 'update', 'delete'],
+  aiConfig: ['create', 'read', 'update', 'delete'],
   sourceTracking: ['create', 'read', 'update', 'delete'],
 })
 
@@ -103,5 +106,6 @@ export const member = ac.newRole({
   candidateMessage: ['create', 'read', 'update'],
   activityLog: ['read'],
   scoring: ['create', 'read'],
+  aiConfig: ['read'],
   sourceTracking: ['read'],
 })
