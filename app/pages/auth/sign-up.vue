@@ -21,6 +21,7 @@ const error = ref("");
 const isLoading = ref(false);
 const localePath = useLocalePath();
 const { track } = useTrack();
+const { trackConversion } = useGoogleAdsConversion();
 const { data: authProviders } = await useFetch('/api/auth/providers');
 const oidcEnabled = computed(() => authProviders.value?.oidc ?? false);
 const oidcProviderName = computed(
@@ -134,6 +135,7 @@ async function handleSignUp() {
     }
 
     track("signup_completed");
+    trackConversion("signup");
 
     clearNuxtData();
 

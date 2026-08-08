@@ -17,6 +17,7 @@ const { orgs, isOrgsLoading, switchOrg, createOrg, activeOrg } = useCurrentOrg()
 const { acceptInviteLink } = useInviteLinks()
 const localePath = useLocalePath()
 const { track } = useTrack()
+const { trackConversion } = useGoogleAdsConversion()
 const route = useRoute()
 
 onMounted(() => track('onboarding_viewed', { mode: viewMode.value }))
@@ -147,6 +148,7 @@ async function handleCreateOrg() {
     // Track before createOrg() because it triggers window.location.href navigation
     // which unloads the page — any code after await would never execute.
     track('org_created')
+    trackConversion('org_created')
     await createOrg(
       { name: orgName.value.trim(), slug: slug.value.trim() },
       { redirectTo: postCreateRedirect.value },

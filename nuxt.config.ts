@@ -264,6 +264,16 @@ export default defineNuxtConfig({
       ),
       /** Display name for the SSO provider button */
       oidcProviderName: process.env.OIDC_PROVIDER_NAME || "SSO",
+      /**
+       * Google Ads conversion ID (e.g. 'AW-18377776892') and per-action
+       * conversion labels. Empty by default so self-hosted deployments load
+       * no Google tag — set only on Reqcore Cloud.
+       */
+      googleAdsId: process.env.NUXT_PUBLIC_GOOGLE_ADS_ID || "",
+      googleAdsSignupLabel:
+        process.env.NUXT_PUBLIC_GOOGLE_ADS_SIGNUP_LABEL || "",
+      googleAdsOrgCreatedLabel:
+        process.env.NUXT_PUBLIC_GOOGLE_ADS_ORG_CREATED_LABEL || "",
     },
   },
 
