@@ -76,7 +76,13 @@ watch(() => route.path, () => { open.value = false })
         <div class="space-y-4 px-4 py-4">
           <UsageMeterBar label="Active roles" :icon="Briefcase" :used="usage.activeRoles.used" :limit="usage.activeRoles.limit" />
           <UsageMeterBar label="AI shortlist runs" :icon="Zap" :used="usage.aiAnalysis.used" :limit="usage.aiAnalysis.limit" />
-          <UsageMeterBar label="Assistant messages" :icon="MessageCircle" :used="usage.aiAssistant.used" :limit="usage.aiAssistant.limit" />
+          <UsageMeterBar
+            label="Assistant credits"
+            :icon="MessageCircle"
+            :used="usage.aiAssistant.used"
+            :limit="usage.aiAssistant.limit"
+            :value-label="`${usage.aiAssistant.used}% used`"
+          />
           <UsageMeterBar label="Candidate conversations" :icon="MessageSquare" :used="usage.candidateConversations.used" :limit="usage.candidateConversations.limit" />
         </div>
 

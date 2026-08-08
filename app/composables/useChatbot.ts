@@ -21,11 +21,14 @@ import type {
   ChatbotConversationSummary,
   ChatbotFolder,
   ChatbotMessage,
+  ChatbotPreferences,
   ChatbotScope,
   ChatbotSource,
   ChatbotStreamEvent,
   ChatbotToolCall,
 } from '~~/shared/chatbot'
+import { PLATFORM_ENGINE_ID } from '~~/shared/chatbot'
+import { chatbotModelChoices, type ChatbotModelChoice } from '~~/shared/chatbot-models'
 
 /** Lightweight summary of an AI configuration as exposed by GET /api/ai-config. */
 export interface ChatbotAiConfigSummary {
@@ -36,6 +39,8 @@ export interface ChatbotAiConfigSummary {
   isDefaultChatbot: boolean
   isDefaultAnalysis: boolean
   hasApiKey: boolean
+  /** Only sent for the platform row; a disabled engine is listed but unusable. */
+  isEnabled?: boolean
   source?: 'byok' | 'platform'
 }
 
@@ -83,6 +88,21 @@ export function useChatbot() {
   const aiConfigs = useState<ChatbotAiConfigSummary[]>('chatbot.aiConfigs', () => [])
   const selectedAiConfigId = useState<string | null>('chatbot.selectedAiConfigId', () => null)
 
+  // The platform engine's row, kept separately from `aiConfigs` (which holds
+  // only the org's own keys). Its presence is what tells the picker whether the
+  // catalogue models are available at all — grandfathered orgs and servers with
+  // no platform key never get one.
+  const platformAiConfig = useState<ChatbotAiConfigSummary | null>('chatbot.platformAiConfig', () => null)
+
+  // Catalogue model pinned for the next turn. `null` = the platform default.
+  // Only meaningful when the platform engine is the active one.
+  const selectedModel = useState<string | null>('chatbot.selectedModel', () => null)
+
+  // The user's starred model, persisted server-side and applied to future
+  // conversations. Existing conversations restore their own `selectedModel`
+  // pin from the conversation row instead.
+  const defaultModel = useState<string | null>('chatbot.defaultModel', () => null)
+
   // Local — not shared across composable instances.
   let abortController: AbortController | null = null
 
@@ -105,33 +125,100 @@ export function useChatbot() {
     agents.value.find((a) => a.isDefault) ?? null,
   )
 
+  /**
+   * Whether the next turn runs on the platform engine — the only case where a
+   * catalogue model applies. Mirrors the server's resolution order: an explicit
+   * pick wins, otherwise "org default" resolves to the platform engine when no
+   * BYOK config has claimed the chatbot-default slot.
+   */
+  const platformEngineActive = computed(() => {
+    const platform = platformAiConfig.value
+    if (!platform || platform.isEnabled === false) return false
+    if (selectedAiConfigId.value === PLATFORM_ENGINE_ID) return true
+    if (selectedAiConfigId.value !== null) return false
+    return platform.isDefaultChatbot
+  })
+
+  /** The catalogue entry in force, or null when the platform default applies. */
+  const selectedModelChoice = computed<ChatbotModelChoice | null>(() => {
+    if (!platformEngineActive.value) return null
+    return chatbotModelChoices().find(m => m.id === selectedModel.value) ?? null
+  })
+
   // ──────────────────────────────────────────────────────────────────────────
   // Folder / agent / conversation loaders
   // ──────────────────────────────────────────────────────────────────────────
   async function loadAll() {
     try {
-      const [convRes, folderRes, agentRes, configRes] = await Promise.all([
+      const [convRes, folderRes, agentRes, configRes, prefRes] = await Promise.all([
         $fetch<{ conversations: ChatbotConversationSummary[] }>('/api/chatbot/conversations'),
         $fetch<{ folders: ChatbotFolder[] }>('/api/chatbot/folders'),
         $fetch<{ agents: ChatbotAgent[] }>('/api/chatbot/agents'),
         $fetch<ChatbotAiConfigSummary[]>('/api/ai-config').catch(() => [] as ChatbotAiConfigSummary[]),
+        $fetch<ChatbotPreferences>('/api/chatbot/preferences').catch(() => ({ defaultModel: null })),
       ])
       conversations.value = convRes.conversations
       folders.value = folderRes.folders
       agents.value = agentRes.agents
-      aiConfigs.value = Array.isArray(configRes) ? configRes.filter(c => c.source !== 'platform') : []
+      applyAiConfigs(configRes)
+      defaultModel.value = prefRes.defaultModel
       if (selectedAgentId.value === null && defaultAgent.value) {
         selectedAgentId.value = defaultAgent.value.id
+      }
+      // A fresh composer starts from the user's default. A conversation opened
+      // immediately afterwards replaces this with its own persisted pin.
+      if (currentConversationId.value === null) {
+        resetModelSelectionToDefault()
       }
     } catch (err) {
       reportError(err, 'Failed to load chat data')
     }
   }
 
+  /**
+   * Point the composer at the starred model. Sets the engine too: a catalogue
+   * model only runs on the platform engine, so selecting one without the other
+   * would show a model that isn't what the next turn actually uses.
+   */
+  function resetModelSelectionToDefault() {
+    const platformAvailable = platformAiConfig.value?.isEnabled !== false
+      && platformAiConfig.value !== null
+    selectedModel.value = platformAvailable ? defaultModel.value : null
+    selectedAiConfigId.value = platformAvailable && defaultModel.value
+      ? PLATFORM_ENGINE_ID
+      : null
+  }
+
+  /**
+   * Star a model as the default for new chats, or pass null to clear it.
+   * Optimistic: the star flips immediately and rolls back if the write fails,
+   * because a star that lags a round-trip reads as a dead control.
+   */
+  async function setDefaultModel(modelId: string | null) {
+    const previous = defaultModel.value
+    defaultModel.value = modelId
+    try {
+      const res = await $fetch<ChatbotPreferences>('/api/chatbot/preferences', {
+        method: 'PATCH',
+        body: { defaultModel: modelId },
+      })
+      defaultModel.value = res.defaultModel
+    } catch (err) {
+      defaultModel.value = previous
+      reportError(err, 'Failed to save default model')
+    }
+  }
+
+  /** Split the /api/ai-config list into the org's own keys and the platform row. */
+  function applyAiConfigs(res: unknown) {
+    const list = Array.isArray(res) ? res as ChatbotAiConfigSummary[] : []
+    aiConfigs.value = list.filter(c => c.source !== 'platform')
+    platformAiConfig.value = list.find(c => c.source === 'platform') ?? null
+  }
+
   async function refreshAiConfigs() {
     try {
-      const res = await $fetch<ChatbotAiConfigSummary[]>('/api/ai-config')
-      aiConfigs.value = Array.isArray(res) ? res.filter(c => c.source !== 'platform') : []
+      applyAiConfigs(await $fetch<ChatbotAiConfigSummary[]>('/api/ai-config'))
     } catch (err) {
       reportError(err, 'Failed to refresh AI configurations')
     }
@@ -180,8 +267,8 @@ export function useChatbot() {
       selectedAgentId.value = res.conversation.agentId
       // Conversations remember which AI config they were last using; surface it
       // in the picker so the user sees the right model on reopen.
-      const convAiConfigId = (res.conversation as { aiConfigId?: string | null }).aiConfigId ?? null
-      selectedAiConfigId.value = convAiConfigId
+      selectedAiConfigId.value = res.conversation.aiConfigId ?? null
+      selectedModel.value = res.conversation.model ?? null
       // Aggregate sources across the conversation history.
       const all: ChatbotSource[] = []
       const seen = new Set<string>()
@@ -205,15 +292,29 @@ export function useChatbot() {
     folderId?: string | null
     agentId?: string | null
     aiConfigId?: string | null
+    model?: string | null
     scope?: ChatbotScope
   } = {}) {
     try {
+      // `newConversation()` means a genuinely new chat, so it starts from the
+      // starred model rather than leaking the model pin from the chat the user
+      // just left. `send()` passes explicit composer values for the draft-only
+      // route, where the user may have picked a model before the chat exists.
+      const hasAiConfigOverride = Object.prototype.hasOwnProperty.call(opts, 'aiConfigId')
+      const hasModelOverride = Object.prototype.hasOwnProperty.call(opts, 'model')
+      const platformAvailable = platformAiConfig.value?.isEnabled !== false
+        && platformAiConfig.value !== null
+      const defaultAiConfigId = platformAvailable && defaultModel.value
+        ? PLATFORM_ENGINE_ID
+        : null
+      const defaultModelId = platformAvailable ? defaultModel.value : null
       const res = await $fetch<{ conversation: ChatbotConversationSummary }>('/api/chatbot/conversations', {
         method: 'POST',
         body: {
           folderId: opts.folderId ?? null,
           agentId: opts.agentId ?? selectedAgentId.value ?? defaultAgent.value?.id ?? null,
-          aiConfigId: opts.aiConfigId ?? selectedAiConfigId.value ?? null,
+          aiConfigId: hasAiConfigOverride ? opts.aiConfigId : defaultAiConfigId,
+          model: hasModelOverride ? opts.model : defaultModelId,
           scope: opts.scope ?? scope.value,
           thinking: thinking.value,
         },
@@ -226,7 +327,8 @@ export function useChatbot() {
       error.value = null
       scope.value = res.conversation.scope
       selectedAgentId.value = res.conversation.agentId
-      selectedAiConfigId.value = (res.conversation as { aiConfigId?: string | null }).aiConfigId ?? null
+      selectedAiConfigId.value = res.conversation.aiConfigId ?? null
+      selectedModel.value = res.conversation.model ?? null
       return res.conversation
     } catch (err) {
       reportError(err, 'Failed to create conversation')
@@ -236,7 +338,7 @@ export function useChatbot() {
 
   async function updateConversation(
     id: string,
-    patch: Partial<Pick<ChatbotConversationSummary, 'title' | 'folderId' | 'agentId' | 'scope' | 'pinned' | 'thinking'>> & { aiConfigId?: string | null },
+    patch: Partial<Pick<ChatbotConversationSummary, 'title' | 'folderId' | 'agentId' | 'scope' | 'pinned' | 'thinking'>> & { aiConfigId?: string | null, model?: string | null },
   ) {
     try {
       const res = await $fetch<{ conversation: ChatbotConversationSummary }>(`/api/chatbot/conversations/${id}`, {
@@ -259,6 +361,7 @@ export function useChatbot() {
         currentConversationId.value = null
         messages.value = []
         sources.value = []
+        resetModelSelectionToDefault()
       }
     } catch (err) {
       reportError(err, 'Failed to delete conversation')
@@ -389,7 +492,12 @@ export function useChatbot() {
 
     // Lazy-create a conversation if there's no active one.
     if (!currentConversationId.value) {
-      const created = await newConversation()
+      // Preserve a model picked on the empty composer. Other new-chat entry
+      // points intentionally omit these overrides and start from the star.
+      const created = await newConversation({
+        aiConfigId: selectedAiConfigId.value,
+        model: selectedModel.value,
+      })
       if (!created) return
     }
     const conversationId = currentConversationId.value
@@ -436,6 +544,7 @@ export function useChatbot() {
           conversationId,
           agentId: selectedAgentId.value,
           aiConfigId: selectedAiConfigId.value,
+          model: selectedModel.value,
           scope: scope.value,
           thinking: thinking.value,
           messages: messages.value
@@ -572,7 +681,9 @@ export function useChatbot() {
         break
       }
       case 'finish':
-        // Could surface usage somewhere; ignored for now.
+        // Nothing to do: the turn's text has already streamed in, and usage is
+        // deliberately not sent to the client. The credit meter refreshes from
+        // /api/billing/status once the stream closes.
         break
       case 'error':
         target.content += `\n\n⚠️ ${ev.error}`
@@ -601,6 +712,13 @@ export function useChatbot() {
     defaultAgent,
     aiConfigs,
     selectedAiConfigId,
+    platformAiConfig,
+    platformEngineActive,
+    selectedModel,
+    selectedModelChoice,
+    defaultModel,
+    setDefaultModel,
+    resetModelSelectionToDefault,
     // ui flags
     isStreaming,
     loadingConversation,

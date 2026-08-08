@@ -3,8 +3,10 @@ import { platformAiConfig } from '../../database/schema'
 import { encrypt } from '../encryption'
 import { resolveOrgPlanId } from '../billing/plan'
 import { OPENROUTER_BASE_URL, type ProviderConfig } from './provider'
+import { isChatbotCatalogueModel } from '../../../shared/chatbot-models'
+import { PLATFORM_ENGINE_ID } from '../../../shared/chatbot'
 
-export const PLATFORM_AI_CONFIG_ID = '__platform__'
+export const PLATFORM_AI_CONFIG_ID = PLATFORM_ENGINE_ID
 export const PLATFORM_AI_PROVIDER = 'openrouter'
 export const DEFAULT_PLATFORM_AI_NAME = 'Reqcore AI'
 export const DEFAULT_PLATFORM_MAX_TOKENS = 4096
@@ -83,9 +85,20 @@ export function toPlatformAiConfigListRow(
   }
 }
 
+/**
+ * Resolve the platform engine's provider config.
+ *
+ * `modelOverride` is the assistant's model picker. It is honoured *only* when
+ * the id is in the vetted catalogue (`shared/chatbot-models.ts`): the value
+ * arrives from a request body, and an arbitrary string here would route
+ * platform-paid traffic to any model on OpenRouter — including ones with no
+ * price on file, which spend money no budget gate can see. Anything unrecognised
+ * silently falls back to the env default rather than erroring, so a stale pin on
+ * an old conversation still answers.
+ */
 export async function resolvePlatformAiProviderConfig(
   orgId: string,
-  opts: { requireEnabled?: boolean } = {},
+  opts: { requireEnabled?: boolean, modelOverride?: string | null } = {},
 ): Promise<{ providerConfig: ProviderConfig, provider: typeof PLATFORM_AI_PROVIDER, model: string }> {
   if (!await canUsePlatformAi(orgId)) {
     throw createError({
@@ -110,7 +123,9 @@ export async function resolvePlatformAiProviderConfig(
     })
   }
 
-  const model = platformModel()
+  const model = isChatbotCatalogueModel(opts.modelOverride)
+    ? opts.modelOverride!
+    : platformModel()
   return {
     providerConfig: {
       provider: PLATFORM_AI_PROVIDER,

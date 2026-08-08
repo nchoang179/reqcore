@@ -8,12 +8,16 @@ import {
   toConversationSummary,
 } from '../../../utils/chatbotConversation'
 import type { ChatbotConversationSummary } from '../../../../shared/chatbot'
+import { isChatbotCatalogueModel } from '../../../../shared/chatbot-models'
 
 const bodySchema = z.object({
   title: z.string().min(1).max(120).trim().optional(),
   folderId: z.string().min(1).nullable().optional(),
   agentId: z.string().min(1).nullable().optional(),
   aiConfigId: z.string().min(1).nullable().optional(),
+  // See index.post.ts — unknown ids are rejected, never coerced.
+  model: z.string().min(1).nullable().optional()
+    .refine(m => m == null || isChatbotCatalogueModel(m), 'Unknown assistant model.'),
   scope: z.object({
     kind: z.enum(['organization', 'job']),
     jobId: z.string().min(1).optional(),
@@ -81,6 +85,13 @@ export default defineEventHandler(async (event): Promise<{ conversation: Chatbot
   if (body.folderId !== undefined) updates.folderId = body.folderId
   if (body.agentId !== undefined) updates.agentId = body.agentId
   if (body.aiConfigId !== undefined) Object.assign(updates, platformPinUpdate(body.aiConfigId))
+  if (body.model !== undefined) updates.chatbotModel = body.model
+  // Switching to a BYOK config drops the model pin: that config brings its own
+  // model, so leaving the pin would resurrect it if the user switched back to
+  // the platform engine later, silently changing what they're billed for.
+  if (body.aiConfigId !== undefined && !isPlatformEngineId(body.aiConfigId)) {
+    updates.chatbotModel = null
+  }
   if (body.scope !== undefined) updates.scope = body.scope
   if (body.thinking !== undefined) updates.thinking = body.thinking
   if (body.pinned !== undefined) updates.pinned = body.pinned

@@ -5,15 +5,22 @@
  * Both meters mirror gates enforced elsewhere:
  *  - activeRoles  → assertActiveRoleLimit (server/utils/billing/plan.ts)
  *  - aiAnalysis   → assertPlatformBudget free-tier count gate (server/utils/ai/budget.ts)
- *  - aiAssistant  → assertChatbotAllowance free-tier turn gate (same file)
+ *  - aiAssistant  → assertChatbotAllowance credit gate (same file)
  *
- * `limit: null` means "no fixed cap on this tier" (e.g. paid AI is a $ budget,
- * agency roles are unlimited) and is JSON-safe, unlike Infinity.
+ * `limit: null` means "no fixed cap on this tier" (e.g. paid analysis is a $
+ * budget, agency roles are unlimited) and is JSON-safe, unlike Infinity.
+ *
+ * `aiAssistant` is the exception to the "used / limit" shape: it reports a
+ * **percentage** (used 0–100 against a limit of 100) on every tier, not a raw
+ * credit balance. A percentage is invariant to the µ$-per-credit rate, so it
+ * tells the customer how much room is left without disclosing what a turn costs
+ * us. Raw credit figures must not leave the server — see ai/credits.ts.
  */
 import { and, eq, ne, sql } from 'drizzle-orm'
-import { aiUsageEvent, analysisRun, candidateMessage, job } from '../../database/schema'
+import { analysisRun, candidateMessage, job } from '../../database/schema'
 import { resolveOrgPlanId } from './plan'
-import { freeChatbotTurnLimit, freeRunLimit } from '../ai/budget'
+import { freeRunLimit, getChatbotCreditUsage } from '../ai/budget'
+import { creditPercentUsed } from '../ai/credits'
 import {
   activeRoleLimitForTier,
   FREE_PLAN_CANDIDATE_CONVERSATION_LIMIT,
@@ -59,22 +66,6 @@ async function countPlatformRuns(orgId: string): Promise<number> {
 }
 
 /**
- * Count assistant turns an org has used (lifetime, any billing mode). Mirrors
- * countChatbotTurns in ai/budget.ts — the meter has to show the same number the
- * gate enforces, including turns a legacy free BYOK config paid for.
- */
-async function countChatbotTurns(orgId: string): Promise<number> {
-  const [row] = await db
-    .select({ total: sql<string>`count(*)` })
-    .from(aiUsageEvent)
-    .where(and(
-      eq(aiUsageEvent.organizationId, orgId),
-      eq(aiUsageEvent.feature, 'chatbot_message'),
-    ))
-  return Number(row?.total ?? 0)
-}
-
-/**
  * Count the distinct candidate conversations an org has started — those holding
  * at least one live (non-failed) outbound message. Mirrors the Free conversation
  * gate enforced in ee/server/utils/candidate-message-allowance.ts
@@ -94,18 +85,19 @@ async function countStartedConversations(orgId: string): Promise<number> {
 }
 
 /**
- * Resolve an org's tier plus its usage against the count-based caps. The AI and
+ * Resolve an org's tier plus its usage against the plan caps. The analysis and
  * candidate-conversation meters only have a fixed limit on the free tier (paid
- * AI is a monthly $ budget; paid messaging is unlimited), so their `limit` is
- * null for any paid tier.
+ * analysis is a monthly $ budget; paid messaging is unlimited), so their `limit`
+ * is null for any paid tier. The assistant meter is populated on *every* tier,
+ * as a percentage — see the file header.
  */
 export async function getOrgUsage(orgId: string): Promise<OrgUsage> {
   const tier = await resolveOrgPlanId(orgId)
 
-  const [openJobs, aiRuns, assistantTurns, conversations] = await Promise.all([
+  const [openJobs, aiRuns, assistantCredits, conversations] = await Promise.all([
     countOpenJobs(orgId),
     countPlatformRuns(orgId),
-    countChatbotTurns(orgId),
+    getChatbotCreditUsage(orgId, tier),
     countStartedConversations(orgId),
   ])
 
@@ -121,9 +113,10 @@ export async function getOrgUsage(orgId: string): Promise<OrgUsage> {
       used: aiRuns,
       limit: tier === 'free' ? freeRunLimit() : null,
     },
+    // Percentage of the credit allowance consumed, never the credits themselves.
     aiAssistant: {
-      used: assistantTurns,
-      limit: tier === 'free' ? freeChatbotTurnLimit() : null,
+      used: creditPercentUsed(assistantCredits.used, assistantCredits.allowance),
+      limit: 100,
     },
     candidateConversations: {
       used: conversations,

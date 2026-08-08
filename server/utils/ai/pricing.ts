@@ -9,7 +9,13 @@
  *
  * Prices are USD per 1,000,000 tokens. Keep in sync with the model lists in
  * `PROVIDER_REGISTRY` (provider.ts) when adding models.
+ *
+ * The assistant's selectable models are the exception: they are declared once in
+ * `shared/chatbot-models.ts` and folded in below. That file owns their prices
+ * because the credit multiplier shown in the picker is derived from the same
+ * numbers — two tables would let the quoted multiplier drift from the charge.
  */
+import { CHATBOT_MODELS } from '../../../shared/chatbot-models'
 
 export interface ModelPrice {
   /** USD per 1M input (prompt) tokens. */
@@ -26,7 +32,7 @@ export interface ModelPrice {
  * OpenRouter-style prefixed ids (e.g. `openai/gpt-5.4-mini`) are normalised to
  * the bare id before lookup, so both forms resolve here.
  */
-export const MODEL_PRICING: Record<string, ModelPrice> = {
+const BASE_MODEL_PRICING: Record<string, ModelPrice> = {
   // OpenAI
   'gpt-5.5': { inputPer1m: 5.0, outputPer1m: 30.0 },
   'gpt-5.4': { inputPer1m: 2.5, outputPer1m: 15.0 },
@@ -56,6 +62,21 @@ export const MODEL_PRICING: Record<string, ModelPrice> = {
   'gemini-2.5-flash': { inputPer1m: 0.3, outputPer1m: 2.5 },
   'gemini-2.0-flash': { inputPer1m: 0.1, outputPer1m: 0.4 },
   'gemini-2.0-flash-lite': { inputPer1m: 0.075, outputPer1m: 0.3 },
+}
+
+/**
+ * The full table: hand-maintained entries above, overlaid with the assistant's
+ * catalogue. The catalogue is applied *last* and therefore wins on the ids it
+ * covers — that is what guarantees the multiplier a customer picked by is the
+ * one their credits were metered at. Ids it doesn't cover (native BYOK ids,
+ * older models, analysis-only models) keep their entries above untouched.
+ */
+export const MODEL_PRICING: Record<string, ModelPrice> = {
+  ...BASE_MODEL_PRICING,
+  ...Object.fromEntries(CHATBOT_MODELS.map(m => [
+    normalizeModelId(m.id),
+    { inputPer1m: m.inputPer1m, outputPer1m: m.outputPer1m },
+  ])),
 }
 
 /** Strip an OpenRouter-style `vendor/` prefix to get the bare model id. */

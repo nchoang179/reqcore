@@ -24,6 +24,9 @@ export function toConversationSummary(row: ConversationRow): ChatbotConversation
     folderId: row.folderId,
     agentId: row.agentId,
     aiConfigId: row.usePlatformAi ? PLATFORM_AI_CONFIG_ID : row.aiConfigId,
+    // The model pin only means anything on the platform engine; hide it on a
+    // BYOK conversation so the picker can't show a model that isn't in use.
+    model: row.usePlatformAi ? row.chatbotModel : null,
     scope: (row.scope ?? { kind: 'organization' }) as ChatbotScope,
     pinned: row.pinned,
     thinking: row.thinking,

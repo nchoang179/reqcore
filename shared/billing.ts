@@ -82,7 +82,17 @@ export const FREE_PLAN_ANALYSIS_LIMIT = 50
 export const FREE_PLAN_CANDIDATE_CONVERSATION_LIMIT = 5
 
 /**
- * Lifetime allowance of platform-paid assistant turns for a free org.
+ * Roughly how many assistant messages a free org's credit grant buys — a
+ * **marketing approximation only**, for public pricing copy.
+ *
+ * The enforced allowance is FREE_PLAN_CHATBOT_CREDITS (server/utils/ai/credits.ts),
+ * denominated in credits rather than turns so a heavy multi-tool question costs
+ * more of the grant than a one-line one. That's the right way to meter, but it
+ * is not a number you can put on a pricing page, hence this separate figure.
+ *
+ * Keep the two roughly in step: this should approximate the grant divided by the
+ * cost of a typical turn. If the grant moves and this doesn't, the pricing page
+ * starts overpromising.
  *
  * The assistant is available on every plan, but Free gets a *taste*: enough to
  * reach the moment it becomes useful, not enough to live in. Twenty is roughly
@@ -93,14 +103,8 @@ export const FREE_PLAN_CANDIDATE_CONVERSATION_LIMIT = 5
  * Lifetime rather than monthly on purpose: a monthly reset teaches people to
  * wait instead of upgrade, and recurs the cost forever on orgs that will never
  * convert. Same grammar as FREE_PLAN_ANALYSIS_LIMIT above.
- *
- * Counts assistant *responses* (`aiUsageEvent` rows), not user keystrokes. On a
- * billing-enabled installation, hosted Free orgs cannot add BYOK, so every new
- * free turn is platform-paid and this count is the whole gate. Billing-disabled
- * self-hosted installations do not enforce this SaaS quota. Override hosted
- * Free with AI_FREE_PLAN_CHATBOT_TURN_LIMIT. Enforced in server/utils/ai/budget.ts.
  */
-export const FREE_PLAN_CHATBOT_TURN_LIMIT = 20
+export const FREE_PLAN_CHATBOT_APPROX_MESSAGES = 20
 
 /**
  * Paid, self-serve plans. Mirrors the marketing pricing page (pricing-v5). Free
@@ -245,7 +249,7 @@ export const FEATURE_MIN_TIER: Record<PlanFeature, BillingTier> = {
   // and keep BYOK — it is the only way they can run AI at all.
   byok: 'solo',
   // Available on every plan. Free is metered by a lifetime turn count
-  // (FREE_PLAN_CHATBOT_TURN_LIMIT) rather than blocked outright: an assistant
+  // (FREE_PLAN_CHATBOT_CREDITS) rather than blocked outright: an assistant
   // nobody has talked to sells nothing, and a turn is a perfectly good unit to
   // meter against now that aiUsageEvent records one row per turn.
   chatbot: 'free',

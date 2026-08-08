@@ -18,10 +18,16 @@ import { resolveChatbotProvider } from '../../utils/ai/resolveProvider'
 import { PLATFORM_AI_CONFIG_ID } from '../../utils/ai/platformConfig'
 import {
   assertChatbotAllowance,
+  assertPricedModel,
   BudgetExceededError,
   budgetErrorToHttp,
 } from '../../utils/ai/budget'
-import { recordAiUsage } from '../../utils/ai/usage'
+import { creditsForMicros } from '../../utils/ai/credits'
+import {
+  releaseChatbotUsage,
+  reserveChatbotUsage,
+  settleChatbotUsage,
+} from '../../utils/ai/usage'
 import { platformPinUpdate } from '../../utils/chatbotConversation'
 import { buildChatbotTools } from '../../utils/ai/chatTools'
 import { getChatbotAttachments } from '../../utils/chatbotAttachments'
@@ -39,6 +45,7 @@ import {
   type ChatbotStreamEvent,
   type ChatbotToolCall,
 } from '../../../shared/chatbot'
+import { isChatbotCatalogueModel } from '../../../shared/chatbot-models'
 
 /**
  * POST /api/chatbot/chat
@@ -68,6 +75,8 @@ const bodySchema = z.object({
   conversationId: z.string().min(1),
   agentId: z.string().min(1).nullable().optional(),
   aiConfigId: z.string().min(1).nullable().optional(),
+  model: z.string().min(1).nullable().optional()
+    .refine(m => m == null || isChatbotCatalogueModel(m), 'Unknown assistant model.'),
   scope: z.object({
     kind: z.enum(['organization', 'job']),
     jobId: z.string().min(1).optional(),
@@ -197,12 +206,27 @@ export default defineEventHandler(async (event) => {
   const preferredAiConfigId =
     body.aiConfigId !== undefined ? body.aiConfigId : conversationPin
 
-  const resolved = await resolveChatbotProvider(orgId, { preferId: preferredAiConfigId })
+  // The model pin follows the same override → conversation → default ladder.
+  // It only reaches the platform engine; `resolveChatbotProvider` drops it on a
+  // BYOK path, where the org's own config decides the model.
+  const preferredModel =
+    body.model !== undefined ? body.model : conversation.chatbotModel
+
+  const resolved = await resolveChatbotProvider(orgId, {
+    preferId: preferredAiConfigId,
+    model: preferredModel,
+  })
   const config = resolved.providerConfig
 
+  // A platform turn we cannot price is a turn we cannot charge credits for, and
+  // an uncharged turn is invisible to both the allowance and the daily
+  // kill-switch. Refuse before spending anything. BYOK is exempt: it's the org's
+  // own bill, so an exotic model costs us nothing to allow.
+  if (resolved.billingMode === 'platform') assertPricedModel(resolved.model)
+
   // Checked before the stream opens, so a capped org gets a clean 429 rather
-  // than a dead stream. Covers both the platform budget (our OpenRouter key)
-  // and the free tier's lifetime turn allowance.
+  // than a dead stream. Covers the org's assistant credit allowance and the
+  // global daily kill-switch.
   try {
     await assertChatbotAllowance(orgId, resolved.billingMode)
   }
@@ -302,6 +326,13 @@ export default defineEventHandler(async (event) => {
   if (body.aiConfigId !== undefined) {
     Object.assign(conversationUpdates, platformPinUpdate(body.aiConfigId))
   }
+  if (body.model !== undefined) conversationUpdates.chatbotModel = body.model
+  // A BYOK configuration supplies its own model. Clear any platform catalogue
+  // pin when switching engines so reopening the conversation cannot revive a
+  // stale selection if it later moves back to Reqcore AI.
+  if (body.aiConfigId !== undefined && body.aiConfigId !== PLATFORM_AI_CONFIG_ID) {
+    conversationUpdates.chatbotModel = null
+  }
   if (body.scope) conversationUpdates.scope = body.scope
   if (isFirstMessage && conversation.title === 'New chat') {
     updatedTitle = autoTitleFromMessage(lastUser.content)
@@ -337,6 +368,19 @@ export default defineEventHandler(async (event) => {
     'Cache-Control': 'no-cache, no-transform',
     'Connection': 'keep-alive',
     'X-Accel-Buffering': 'no',
+  })
+
+  // Claim an estimated charge against the allowance *before* the turn runs, so
+  // concurrent turns can see it. The gate above is pre-spend: without a
+  // reservation, N simultaneous requests all read the same balance and every one
+  // of them passes a check that only had room for one. Reconciled to the real
+  // cost in the `finally` below.
+  const usageRowId = await reserveChatbotUsage({
+    orgId,
+    userId: session.user.id,
+    provider: resolved.provider,
+    model: resolved.model,
+    billingMode: resolved.billingMode,
   })
 
   const startedAt = Date.now()
@@ -458,13 +502,10 @@ export default defineEventHandler(async (event) => {
                 reasoning: part.totalUsage.reasoningTokens ?? undefined,
                 cached: part.totalUsage.cachedInputTokens ?? undefined,
               }
-              writeEvent(controller, {
-                type: 'finish',
-                usage: {
-                  promptTokens: finalUsage.prompt,
-                  completionTokens: finalUsage.completion,
-                },
-              })
+              // Token counts stay server-side. With a known model they are an
+              // exact per-turn cost disclosure, which is the one thing the
+              // credit unit exists to avoid.
+              writeEvent(controller, { type: 'finish' })
               break
             }
             default:
@@ -574,22 +615,29 @@ export default defineEventHandler(async (event) => {
           console.error('[chatbot] failed to persist assistant message', persistErr)
         }
 
-        // Spend ledger — the budget gate reads this, so platform turns must be
-        // recorded even when the stream ended badly (tokens were still spent).
+        // Settle the reservation against what the turn actually cost. A turn
+        // that never reported usage produced no answer, so its reservation is
+        // released rather than charged — the allowance is spent on answers, not
+        // on our failures.
         const turnCostUsdMicros = finalUsage
           ? computeCostUsdMicros(resolved.model, finalUsage.prompt, finalUsage.completion)
           : null
-        await recordAiUsage({
-          orgId,
-          userId: session.user.id,
-          feature: 'chatbot_message',
-          provider: resolved.provider,
-          model: resolved.model,
-          billingMode: resolved.billingMode,
-          promptTokens: finalUsage?.prompt ?? null,
-          completionTokens: finalUsage?.completion ?? null,
-          costUsdMicros: turnCostUsdMicros,
-        })
+
+        if (usageRowId) {
+          if (finalUsage) {
+            await settleChatbotUsage(usageRowId, {
+              promptTokens: finalUsage.prompt,
+              completionTokens: finalUsage.completion,
+              costUsdMicros: turnCostUsdMicros,
+              creditsCharged: turnCostUsdMicros != null
+                ? creditsForMicros(turnCostUsdMicros)
+                : null,
+            })
+          }
+          else {
+            await releaseChatbotUsage(usageRowId)
+          }
+        }
 
         // PostHog LLM observability. One event per turn, grouped under the
         // conversation trace. `billingMode` mirrors the ledger row above.

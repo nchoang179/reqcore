@@ -126,13 +126,18 @@ export async function resolveAnalysisProvider(
  * (their free tier is explicitly BYOK-only, since they pay their LLM provider
  * directly) — so for them steps 3 and 5 are unavailable and a missing BYOK
  * config surfaces as the 422 rather than silently spending the platform key.
+ *
+ * `model` is the composer's model picker and applies to the platform paths only.
+ * A BYOK config carries its own model id — the org's key may not even be able to
+ * reach the picked one — so the pin is ignored on those paths rather than
+ * forced onto a provider that would reject it.
  */
 export async function resolveChatbotProvider(
   orgId: string,
-  opts: { preferId?: string | null } = {},
+  opts: { preferId?: string | null, model?: string | null } = {},
 ): Promise<ResolvedProvider> {
   if (opts.preferId === PLATFORM_AI_CONFIG_ID) {
-    const platform = await resolvePlatformAiProviderConfig(orgId)
+    const platform = await resolvePlatformAiProviderConfig(orgId, { modelOverride: opts.model })
     return { ...platform, billingMode: 'platform' }
   }
 
@@ -143,7 +148,7 @@ export async function resolveChatbotProvider(
       && platformOverride.isDefaultChatbot
       && await canUsePlatformAi(orgId)
     ) {
-      const platform = await resolvePlatformAiProviderConfig(orgId)
+      const platform = await resolvePlatformAiProviderConfig(orgId, { modelOverride: opts.model })
       return { ...platform, billingMode: 'platform' }
     }
   }
@@ -170,7 +175,7 @@ export async function resolveChatbotProvider(
     const platformOverride = await getPlatformAiOverride(orgId)
     if (!platformOverrideEnabled(platformOverride)) throw err
 
-    const platform = await resolvePlatformAiProviderConfig(orgId)
+    const platform = await resolvePlatformAiProviderConfig(orgId, { modelOverride: opts.model })
     return { ...platform, billingMode: 'platform' }
   }
 }

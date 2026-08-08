@@ -12,6 +12,14 @@
  *     held server-side in memory under the user's session for a short TTL.
  */
 
+/**
+ * Sentinel id for the platform ("Reqcore AI") engine in every place an
+ * `aiConfigId` is expected. It has no ai_config row, so it needs an id the
+ * client and server both agree on. Shared rather than server-only because the
+ * composer's picker has to name it too.
+ */
+export const PLATFORM_ENGINE_ID = '__platform__'
+
 /** Maximum size for chatbot file uploads (8 MB). */
 export const CHATBOT_MAX_UPLOAD_BYTES = 8 * 1024 * 1024
 
@@ -141,6 +149,16 @@ export interface ChatbotFolder {
   createdAt: number
 }
 
+/**
+ * A user's assistant defaults, independent of any one conversation. Every field
+ * is nullable: absent means "no preference", which is what a user who has never
+ * opened the picker has.
+ */
+export interface ChatbotPreferences {
+  /** Starred catalogue model used for new chats. Null = use the org default. */
+  defaultModel: string | null
+}
+
 /** Maximum number of folders a user can create. */
 export const CHATBOT_FOLDER_MAX_PER_USER = 50
 
@@ -152,6 +170,11 @@ export interface ChatbotConversationSummary {
   agentId: string | null
   /** Pinned AI configuration for this conversation. Falls back to the org chatbot default. */
   aiConfigId: string | null
+  /**
+   * Pinned catalogue model (see shared/chatbot-models.ts). Applies to the
+   * platform engine only; null means the platform default.
+   */
+  model: string | null
   scope: ChatbotScope
   pinned: boolean
   thinking: boolean
@@ -173,6 +196,11 @@ export interface ChatbotChatRequest {
   agentId?: string | null
   /** Optional override; falls back to the conversation's pinned config or the org chatbot default. */
   aiConfigId?: string | null
+  /**
+   * Optional catalogue model override; falls back to the conversation's pinned
+   * model, then the platform default. Ignored when the turn runs on a BYOK key.
+   */
+  model?: string | null
   scope: ChatbotScope
   messages: Array<Pick<ChatbotMessage, 'role' | 'content'> & {
     attachmentIds?: string[]
@@ -192,5 +220,10 @@ export type ChatbotStreamEvent =
   | { type: 'source'; source: ChatbotSource }
   /** Conversation metadata updated (e.g. auto-generated title). */
   | { type: 'conversation-meta'; conversationId: string; title?: string }
-  | { type: 'finish'; usage?: { promptTokens: number; completionTokens: number } }
+  /**
+   * The turn ended. Carries no usage figures on purpose: token counts plus a
+   * known model are an exact disclosure of what a turn costs us, which is
+   * precisely what metering in credits is meant to keep private.
+   */
+  | { type: 'finish' }
   | { type: 'error'; error: string }

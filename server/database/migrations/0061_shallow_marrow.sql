@@ -18,7 +18,10 @@ INSERT INTO "chatbot_message_entity_reference" (
 	"id", "message_id", "organization_id", "entity_type", "entity_id", "created_at"
 )
 SELECT
-	md5(message."id" || ':' || source.value->>'kind' || ':' || source.value->>'entityId'),
+	-- Parentheses are required: `||` and `->>` share a precedence level and
+	-- associate left-to-right, so an unparenthesised `a || b || v->>'k'` parses
+	-- as `((a || b) || v) ->> 'k'` and fails with `operator does not exist: text ->> unknown`.
+	md5(message."id" || ':' || (source.value->>'kind') || ':' || (source.value->>'entityId')),
 	message."id",
 	message."organization_id",
 	source.value->>'kind',

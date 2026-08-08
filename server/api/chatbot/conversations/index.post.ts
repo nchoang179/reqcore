@@ -8,12 +8,18 @@ import {
   toConversationSummary,
 } from '../../../utils/chatbotConversation'
 import type { ChatbotConversationSummary } from '../../../../shared/chatbot'
+import { isChatbotCatalogueModel } from '../../../../shared/chatbot-models'
 
 const bodySchema = z.object({
   title: z.string().min(1).max(120).trim().optional(),
   folderId: z.string().min(1).nullable().optional(),
   agentId: z.string().min(1).nullable().optional(),
   aiConfigId: z.string().min(1).nullable().optional(),
+  // Rejected rather than coerced: an unknown id means the client and the
+  // catalogue disagree, and silently substituting the default would bill the
+  // user for a model they did not choose.
+  model: z.string().min(1).nullable().optional()
+    .refine(m => m == null || isChatbotCatalogueModel(m), 'Unknown assistant model.'),
   scope: z.object({
     kind: z.enum(['organization', 'job']),
     jobId: z.string().min(1).optional(),
@@ -86,6 +92,9 @@ export default defineEventHandler(async (event): Promise<{ conversation: Chatbot
     folderId: body.folderId ?? null,
     agentId: body.agentId ?? null,
     ...platformPinUpdate(body.aiConfigId ?? null),
+    // A catalogue model is meaningful only on the platform engine. Normalise
+    // inconsistent clients instead of storing a hidden model beside BYOK.
+    chatbotModel: isPlatformEngineId(body.aiConfigId) ? body.model ?? null : null,
     title: body.title ?? 'New chat',
     scope: body.scope,
     thinking: body.thinking === true,

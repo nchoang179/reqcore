@@ -51,7 +51,7 @@ export const FEATURE_FLAGS = {
    *
    * This flag answers "has it shipped?", not "how much may this org use?" —
    * the assistant is entitled on every plan (`chatbot` in shared/billing.ts),
-   * with Free capped at FREE_PLAN_CHATBOT_TURN_LIMIT turns by the spend gate in
+   * with Free capped at FREE_PLAN_CHATBOT_CREDITS by the credit gate in
    * server/utils/ai/budget.ts. Once the rollout is complete, flip this default
    * to `true` and the turn cap stands alone.
    */

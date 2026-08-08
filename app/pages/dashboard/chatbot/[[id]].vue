@@ -27,13 +27,14 @@ const entitled = computed(() => hasFeature('chatbot'))
 const enabled = computed(() => shipped.value && entitled.value)
 
 // The server owns the allowance; this shared billing meter lets the composer
-// warn before the last free turns and become an upgrade path once they are
-// spent. Members can still read every existing conversation after the cap.
+// warn before the last credits and become an upgrade path once they are spent.
+// Members can still read every existing conversation after the cap. Only a
+// percentage is available here — see useChatbotQuota for why.
 const {
-  limit: chatbotLimit,
-  remaining: chatbotMessagesLeft,
+  percentRemaining: chatbotPercentLeft,
   exhausted: chatbotQuotaExhausted,
   nearLimit: chatbotQuotaNearLimit,
+  isFree: chatbotOnFreePlan,
   refresh: refreshChatbotQuota,
 } = useChatbotQuota()
 const {
@@ -66,6 +67,7 @@ const {
   loadAll,
   newConversation,
   openConversation,
+  resetModelSelectionToDefault,
 } = useChatbot()
 
 const route = useRoute()
@@ -94,6 +96,7 @@ async function syncFromRoute() {
     currentConversationId.value = null
     messages.value = []
     sources.value = []
+    resetModelSelectionToDefault()
   }
 }
 
@@ -158,7 +161,6 @@ async function handleSubmit() {
   if (isStreaming.value || chatbotQuotaExhausted.value) return
   const content = draft.value
   draft.value = ''
-  shouldFollowGeneration.value = true
   await nextTick(autoResize)
   try {
     await send(content)
@@ -167,7 +169,6 @@ async function handleSubmit() {
     // The usage ledger is persisted before the response stream closes, so this
     // sees the just-completed turn and swaps the composer at exactly the cap.
     await refreshChatbotQuota()
-    await nextTick(scrollToBottom)
   }
 }
 
@@ -192,60 +193,20 @@ async function handleFileChange(e: Event) {
   }
 }
 
-// ── Auto-scroll on incoming chunks ──
+// ── Conversation scrolling ──
 const scrollerRef = useTemplateRef<HTMLElement>('scroller')
-const messagesListRef = useTemplateRef<HTMLElement>('messagesList')
-const shouldFollowGeneration = ref(true)
-const bottomThreshold = 80
-let messagesResizeObserver: ResizeObserver | null = null
-let scrollFrame: number | null = null
-
-function scrollToBottom(force = false) {
-  const el = scrollerRef.value
-  if (!el || (!force && !shouldFollowGeneration.value)) return
-
-  if (scrollFrame !== null) cancelAnimationFrame(scrollFrame)
-  scrollFrame = requestAnimationFrame(() => {
-    const scroller = scrollerRef.value
-    if (scroller && (force || shouldFollowGeneration.value)) {
-      scroller.scrollTop = scroller.scrollHeight
-    }
-    scrollFrame = null
-  })
-}
-
-function handleScrollerScroll() {
+function scrollToBottom() {
   const el = scrollerRef.value
   if (!el) return
-  const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
-  shouldFollowGeneration.value = distanceFromBottom <= bottomThreshold
+  el.scrollTop = el.scrollHeight
 }
 
-// Markdown rendering may finish after the message watcher has run. Observing
-// the rendered list keeps the latest generated text visible as its real DOM
-// height grows, while preserving the user's position if they scroll upward.
-watch(messagesListRef, (list) => {
-  messagesResizeObserver?.disconnect()
-  messagesResizeObserver = null
-  if (!list || typeof ResizeObserver === 'undefined') return
-
-  messagesResizeObserver = new ResizeObserver(() => scrollToBottom())
-  messagesResizeObserver.observe(list)
+// Move to newly-added messages once, but do not follow streamed content as it
+// grows. The reader controls their position during generation.
+watch(() => messages.value.length, (length, previousLength) => {
+  if (length > previousLength) nextTick(scrollToBottom)
 })
-
-watch(
-  () => messages.value.map((m) => m.content.length + (m.reasoning?.length ?? 0) + (m.toolCalls?.length ?? 0)).join(','),
-  () => nextTick(scrollToBottom),
-)
-watch(currentConversationId, () => {
-  shouldFollowGeneration.value = true
-  nextTick(() => scrollToBottom(true))
-})
-
-onUnmounted(() => {
-  messagesResizeObserver?.disconnect()
-  if (scrollFrame !== null) cancelAnimationFrame(scrollFrame)
-})
+watch(currentConversationId, () => nextTick(scrollToBottom))
 
 // ── Suggestions for empty state ──
 const suggestions = computed(() => {
@@ -459,7 +420,6 @@ async function startNew() {
         v-else
         ref="scroller"
         class="relative flex-1 min-h-0 overflow-y-auto"
-        @scroll.passive="handleScrollerScroll"
       >
         <!-- Empty state -->
         <div v-if="messages.length === 0" class="mx-auto flex h-full max-w-3xl flex-col items-center justify-center px-6 py-12 text-center">
@@ -467,7 +427,10 @@ async function startNew() {
             {{ chatbotQuotaExhausted ? 'Your conversations are still here' : 'What do you want to figure out?' }}
           </h2>
           <p v-if="chatbotQuotaExhausted" class="mt-2 max-w-md text-sm text-surface-500">
-            Open any previous chat from the sidebar whenever you need it. Upgrade to Solo below when you're ready to ask the assistant something new.
+            Open any previous chat from the sidebar whenever you need it.
+            {{ chatbotOnFreePlan
+              ? 'Upgrade to Solo below when you\'re ready to ask the assistant something new.'
+              : 'Your credits renew next month — or connect your own AI key below to keep going now.' }}
           </p>
           <p v-else class="mt-2 max-w-md text-sm text-surface-500">
             Ask anything about your jobs, candidates, applications, or uploaded resumes.
@@ -486,7 +449,7 @@ async function startNew() {
         </div>
 
         <!-- Messages -->
-        <div v-else ref="messagesList" class="mx-auto max-w-3xl space-y-6 px-4 py-6 sm:px-8">
+        <div v-else class="mx-auto max-w-3xl space-y-6 px-4 py-6 sm:px-8">
           <div
             v-for="m in messages"
             :key="m.id"
@@ -660,7 +623,7 @@ async function startNew() {
         <div class="mx-auto w-full max-w-3xl">
           <ChatbotQuotaUpsellCard
             v-if="chatbotQuotaExhausted"
-            :limit="chatbotLimit ?? 0"
+            :on-free-plan="chatbotOnFreePlan"
             :can-manage="canManageBilling"
             :permission-loading="billingPermissionLoading"
           />
@@ -674,15 +637,17 @@ async function startNew() {
               <p class="flex items-center gap-2">
                 <AlertCircle class="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
                 <span>
-                  <strong>{{ chatbotMessagesLeft }} free {{ chatbotMessagesLeft === 1 ? 'message' : 'messages' }} left.</strong>
-                  Upgrade to keep chatting without losing your flow.
+                  <strong>About {{ chatbotPercentLeft }}% of your assistant credits left.</strong>
+                  {{ chatbotOnFreePlan
+                    ? 'Upgrade to keep chatting without losing your flow.'
+                    : 'They renew next month, or connect your own AI key for unlimited messages.' }}
                 </span>
               </p>
               <NuxtLink
-                :to="soloUpgradeTarget"
+                :to="chatbotOnFreePlan ? soloUpgradeTarget : localePath('/dashboard/settings/ai')"
                 class="shrink-0 font-semibold text-amber-800 underline decoration-amber-400/70 underline-offset-2 hover:text-amber-950 dark:text-amber-200 dark:hover:text-white"
               >
-                Upgrade to Solo
+                {{ chatbotOnFreePlan ? 'Upgrade to Solo' : 'Connect your key' }}
               </NuxtLink>
             </div>
 
