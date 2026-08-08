@@ -3,7 +3,6 @@ import { copyFile, mkdir } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import tailwindcss from "@tailwindcss/vite";
-import { readEnvFlagOverrides } from "./shared/feature-flags";
 
 // Resolved here so the build fails loudly at config load if pdfjs-dist ever
 // moves the file, rather than silently shipping a server that can't read PDFs.
@@ -265,19 +264,6 @@ export default defineNuxtConfig({
       ),
       /** Display name for the SSO provider button */
       oidcProviderName: process.env.OIDC_PROVIDER_NAME || "SSO",
-      /**
-       * Feature flag overrides forced by env vars (FEATURE_FLAG_*).
-       * Self-hosters use these to enable/disable flags without running PostHog.
-       * See `shared/feature-flags.ts` for the full registry and resolution order.
-       */
-      // Cast: Nuxt narrows public runtime config from the registry's literal
-      // `defaultValue` types (boolean here), but env overrides can also be
-      // multivariate strings — and entries are partial. The override map is
-      // validated at runtime by `parseFlagOverride`, so the cast is safe.
-      featureFlagOverrides: readEnvFlagOverrides() as Record<
-        string,
-        boolean | string
-      >,
     },
   },
 

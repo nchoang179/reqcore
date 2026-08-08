@@ -17,14 +17,8 @@ useSeoMeta({
   robots: 'noindex, nofollow',
 })
 
-// Two independent gates, matching the server (utils/chatbotAccess.ts):
-// the flag says whether the assistant has shipped, the plan entitlement says
-// whether this org may use it. Unshipped renders nothing; unentitled renders
-// the upgrade card.
-const shipped = useFeatureFlagEnabled('chatbot-experience')
 const { hasFeature } = usePlanFeature()
 const entitled = computed(() => hasFeature('chatbot'))
-const enabled = computed(() => shipped.value && entitled.value)
 
 // The server owns the allowance; this shared billing meter lets the composer
 // warn before the last credits and become an upgrade path once they are spent.
@@ -273,19 +267,7 @@ async function startNew() {
 </script>
 
 <template>
-  <!-- Not shipped for this account yet: say nothing about plans. -->
-  <div v-if="!shipped" class="mx-auto max-w-2xl py-24 text-center">
-    <Sparkles class="mx-auto size-10 text-surface-400" />
-    <h1 class="mt-4 text-2xl font-semibold text-surface-900 dark:text-surface-100">
-      Reqcore Assistant
-    </h1>
-    <p class="mt-2 text-sm text-surface-500">
-      This feature isn't available on your account yet.
-    </p>
-  </div>
-
-  <!-- Shipped, but the org's plan doesn't include it: sell the upgrade. -->
-  <div v-else-if="!entitled" class="mx-auto max-w-2xl px-4 py-16">
+  <div v-if="!entitled" class="mx-auto max-w-2xl px-4 py-16">
     <FeatureLockCard
       feature="chatbot"
       title="Unlock the Reqcore Assistant"
