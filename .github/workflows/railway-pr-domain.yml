@@ -66,16 +66,22 @@ jobs:
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
-      - name: Wait for the PR environment to exist
+      - name: Wait for the PR environment and link to it
         id: env
         run: |
           set -euo pipefail
           ENV_NAME="${ENV_PREFIX}${PR_NUMBER}"
-          echo "env_name=$ENV_NAME" >> "$GITHUB_OUTPUT"
           echo "Looking for Railway environment: $ENV_NAME"
-          # Railway creates the PR environment asynchronously after the PR opens.
+
+          # `railway link` doubles as the existence check: it exits 0 once the
+          # environment exists, and non-zero (listing the real environment
+          # names) while it does not. Railway creates the PR environment
+          # asynchronously after the PR opens, hence the retry.
           for attempt in $(seq 1 20); do
-            if railway environment "$ENV_NAME" --project "$PROJECT_ID" >/dev/null 2>&1; then
+            if railway link \
+              --project "$PROJECT_ID" \
+              --environment "$ENV_NAME" \
+              --service "$SERVICE_NAME" 2>link.log; then
               echo "found=true" >> "$GITHUB_OUTPUT"
               exit 0
             fi
@@ -83,22 +89,18 @@ jobs:
             sleep 15
           done
 
-          # Never appeared. Print what does exist so a naming mismatch is
-          # obvious rather than being reported as a timeout.
-          echo "Environments visible in project $PROJECT_ID:"
-          railway environment --project "$PROJECT_ID" --json 2>&1 || true
-          echo "::error::Railway environment '$ENV_NAME' never appeared. If the list above uses different names (e.g. the branch name), update this workflow's lookup."
+          # Never appeared. The CLI's own error lists the environments it can
+          # see, which distinguishes a naming mismatch from a token that lacks
+          # access to the project.
+          cat link.log || true
+          echo "::error::Could not link Railway environment '$ENV_NAME'. If the names listed above differ, set the RAILWAY_PR_ENV_PREFIX variable; if none are listed, RAILWAY_API_TOKEN likely lacks access (a project-scoped token cannot see PR environments)."
           exit 1
 
       - name: Generate a domain if the service has none
         if: steps.env.outputs.found == 'true'
         run: |
           set -euo pipefail
-          ENV_NAME="${{ steps.env.outputs.env_name }}"
-          railway link \
-            --project "$PROJECT_ID" \
-            --environment "$ENV_NAME" \
-            --service "$SERVICE_NAME"
+          # Already linked by the previous step.
 
           # `railway domain` is idempotent: it prints the existing domain when
           # one is already attached rather than creating a second.
