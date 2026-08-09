@@ -103,10 +103,16 @@ export function useCandidateMessages() {
     try {
       selected.value = await $fetch<CandidateConversation>(`/api/candidate-messages/${id}`)
       if (options.markRead !== false && selected.value.unreadCount > 0) {
-        await $fetch(`/api/candidate-messages/${id}/read`, { method: 'POST' })
-        selected.value.unreadCount = 0
-        const summary = conversations.value.find(item => item.id === id)
-        if (summary) summary.unreadCount = 0
+        // Best effort: the conversation is already loaded, and read-only
+        // contexts (the shared demo) reject the write. Never fail the load.
+        try {
+          await $fetch(`/api/candidate-messages/${id}/read`, { method: 'POST' })
+          selected.value.unreadCount = 0
+          const summary = conversations.value.find(item => item.id === id)
+          if (summary) summary.unreadCount = 0
+        } catch {
+          // keep the unread badge as-is
+        }
       }
     } finally {
       loadingConversation.value = false
