@@ -64,5 +64,14 @@ export default defineEventHandler(async (event) => {
     jobId: result.jobId,
   })
 
+  // Opening the detail is what "viewing an applicant" means, and every surface
+  // (pipeline, table drawer, full page) goes through here — so the receipt is
+  // logged once, server-side, instead of at each call site.
+  await recordApplicationView({
+    organizationId: orgId,
+    applicationId: result.id,
+    userId: session.user.id,
+  })
+
   return { ...result, properties }
 })

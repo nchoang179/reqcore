@@ -74,9 +74,19 @@ export default defineEventHandler(async (event) => {
     }
   }
 
+  // "Applicants you haven't opened yet" — the number that actually needs the
+  // recruiter's attention, unlike the `new` stage count, which stays high long
+  // after every one of them has been read.
+  const unviewedMap = await unviewedCountsByJob({
+    organizationId: orgId,
+    userId: session.user.id,
+    jobIds,
+  })
+
   const enrichedData = data.map((j) => ({
     ...j,
     pipeline: pipelineMap[j.id] ?? { new: 0, screening: 0, interview: 0, offer: 0, hired: 0, rejected: 0 },
+    unviewed: unviewedMap.get(j.id) ?? 0,
   }))
 
   return { data: enrichedData, total, page: query.page, limit: query.limit }

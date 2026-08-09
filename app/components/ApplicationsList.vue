@@ -417,6 +417,15 @@ function getPropertyValue(entity: { properties?: import('~~/shared/properties').
 // ── Application detail drawer ─────────────────────────────────────────────────
 const selectedApplicationId = ref<string | null>(props.initialApplicationId ?? null)
 
+// Opening the drawer renders <ApplicationDetail>, whose detail request logs the
+// view server-side; mirroring it here drops the marker straight away.
+const { markViewedLocally, isViewed } = useApplicationViews()
+
+function openApplication(applicationId: string) {
+  selectedApplicationId.value = applicationId
+  markViewedLocally(applicationId)
+}
+
 async function handleApplicationDeleted() {
   selectedApplicationId.value = null
   await refresh()
@@ -740,14 +749,26 @@ async function handleApplicationDeleted() {
               :class="app.id === selectedApplicationId
                 ? 'bg-brand-50 dark:bg-brand-500/10 hover:bg-brand-50 dark:hover:bg-brand-500/10'
                 : 'bg-white dark:bg-surface-900 hover:bg-surface-50 dark:hover:bg-surface-800/60'"
-              @click="selectedApplicationId = app.id"
+              @click="openApplication(app.id)"
             >
               <td class="px-4 py-3">
                 <button
                   type="button"
-                  class="font-semibold text-surface-900 dark:text-surface-100 group-hover:text-brand-600 transition-colors whitespace-nowrap text-left cursor-pointer"
-                  @click.stop="selectedApplicationId = app.id"
+                  class="inline-flex items-center gap-1.5 font-semibold text-surface-900 dark:text-surface-100 group-hover:text-brand-600 transition-colors whitespace-nowrap text-left cursor-pointer"
+                  @click.stop="openApplication(app.id)"
                 >
+                  <!-- Unread-mail convention: the dot marks applicants this
+                       recruiter has never opened. -->
+                  <span
+                    v-if="!isViewed(app)"
+                    class="size-1.5 shrink-0 rounded-full bg-brand-500 dark:bg-brand-400"
+                    title="You haven't viewed this applicant yet"
+                  />
+                  <span
+                    v-else
+                    class="size-1.5 shrink-0"
+                    aria-hidden="true"
+                  />
                   {{ formatPersonName(app.candidateFirstName, app.candidateLastName) }}
                 </button>
               </td>
