@@ -5,14 +5,14 @@
  * - 1 demo user (demo@reqcore.com / demo1234)
  * - 1 organization ("Reqcore Demo")
  * - 5 jobs with varying statuses
- * - 420 candidates
- * - 427+ applications across all pipeline stages (134 on Senior Full-Stack Engineer, 262 on Product Designer)
- * - Custom questions on select jobs
+ * - Only candidates attached to the top 3 scored applications in each job/status
+ * - At most 3 applications per pipeline stage and job, ordered by score
+ * - 35 candidate inbox messages across 28 conversations and every represented pipeline status
+ * - Custom application questions and automation rules for every job
  * - Question responses on applications
- * - 20 tracking links across 14+ source channels (LinkedIn, Indeed, etc.)
- * - 160+ application source attribution records with UTM & referrer data
- * - 35+ scheduled/completed interviews across the pipeline
- * - 800+ activity log entries covering all action types (for Timeline page)
+ * - Tracking links and source attribution with UTM & referrer data
+ * - Scheduled/completed interviews across the pipeline
+ * - Activity log entries covering all action types (for Timeline page)
  *
  * Usage: npx tsx server/scripts/seed.ts
  * Requires DATABASE_URL in .env (loaded via dotenv or shell env).
@@ -27,6 +27,11 @@ import { hashPassword } from "better-auth/crypto";
 import * as schema from "../database/schema";
 import { resolveDatabaseUrl } from "../utils/database-url";
 import { encrypt } from "../utils/encryption";
+import {
+  DEMO_AUTOMATION_RULES,
+  DEMO_JOB_QUESTIONS,
+} from "./seed-data/automation";
+import { selectTopApplicationsPerStatus } from "./seed-data/top-applications";
 
 // ─────────────────────────────────────────────
 // Config
@@ -2753,79 +2758,6 @@ const CANDIDATES_DATA = [
   },
 ];
 
-// Questions for the Senior Full-Stack Engineer job
-const FULLSTACK_QUESTIONS = [
-  {
-    type: "short_text" as const,
-    label: "Years of TypeScript experience",
-    required: true,
-  },
-  {
-    type: "single_select" as const,
-    label: "Preferred frontend framework",
-    options: ["Vue", "React", "Svelte", "Angular", "Solid"],
-    required: true,
-  },
-  {
-    type: "long_text" as const,
-    label: "Describe a challenging technical problem you solved recently",
-    required: true,
-  },
-  {
-    type: "url" as const,
-    label: "Link to your GitHub profile or portfolio",
-    required: false,
-  },
-  {
-    type: "single_select" as const,
-    label: "When can you start?",
-    options: ["Immediately", "2 weeks", "1 month", "2-3 months"],
-    required: true,
-  },
-];
-
-// Questions for Product Designer
-const DESIGNER_QUESTIONS = [
-  { type: "url" as const, label: "Link to your portfolio", required: true },
-  {
-    type: "single_select" as const,
-    label: "Primary design tool",
-    options: ["Figma", "Sketch", "Adobe XD", "Framer"],
-    required: true,
-  },
-  {
-    type: "long_text" as const,
-    label: "Walk us through your design process for a recent project",
-    required: true,
-  },
-  {
-    type: "checkbox" as const,
-    label: "I have experience with design systems",
-    required: false,
-  },
-];
-
-// Questions for DevOps Engineer
-const DEVOPS_QUESTIONS = [
-  {
-    type: "multi_select" as const,
-    label: "Which cloud platforms have you worked with?",
-    options: ["AWS", "GCP", "Azure", "Hetzner", "DigitalOcean", "Other"],
-    required: true,
-  },
-  {
-    type: "short_text" as const,
-    label: "Years of Docker experience",
-    required: true,
-  },
-  {
-    type: "single_select" as const,
-    label: "Preferred CI/CD platform",
-    options: ["GitHub Actions", "GitLab CI", "Jenkins", "CircleCI", "Other"],
-    required: true,
-  },
-];
-
 // ─────────────────────────────────────────────
 // Application distribution map
 // Ensures realistic pipeline distribution across all stages
@@ -2840,6 +2772,8 @@ interface ApplicationAssignment {
   score?: number;
   notes?: string;
 }
+
+const DEMO_APPLICATIONS_PER_STATUS = 3;
 
 // Job 0: Senior Full-Stack Engineer — high volume, full funnel
 const JOB_0_APPS: ApplicationAssignment[] = [
@@ -4096,13 +4030,40 @@ const JOB_4_APPS: ApplicationAssignment[] = [
   },
 ];
 
-const JOB_APPLICATIONS = [
+const ALL_JOB_APPLICATIONS = [
   JOB_0_APPS,
   JOB_1_APPS,
   JOB_2_APPS,
   JOB_3_APPS,
   JOB_4_APPS,
 ];
+
+/**
+ * The pipeline defaults to "Highest score", so seed only the records a demo
+ * visitor can meaningfully inspect at the top of every job/status combination.
+ */
+const JOB_APPLICATIONS = ALL_JOB_APPLICATIONS.map((applications) =>
+  selectTopApplicationsPerStatus(
+    applications,
+    DEMO_APPLICATIONS_PER_STATUS,
+  ),
+);
+
+const DEMO_CANDIDATE_INDICES = [
+  ...new Set(
+    JOB_APPLICATIONS.flatMap((applications) =>
+      applications.map((application) => application.candidateIndex),
+    ),
+  ),
+].sort((left, right) => left - right);
+
+const DEMO_APPLICATION_KEYS = new Set(
+  JOB_APPLICATIONS.flatMap((applications, jobIndex) =>
+    applications.map(
+      (application) => `${jobIndex}-${application.candidateIndex}`,
+    ),
+  ),
+);
 
 // ─────────────────────────────────────────────
 // AI Scoring — Criteria definitions per job
@@ -7178,14 +7139,14 @@ const INTERVIEWS_DATA: InterviewSeed[] = [
 function generateResponses(
   jobIndex: number,
   candidateIndex: number,
-): Record<string, string | string[] | boolean> {
+): Record<string, string | string[] | number | boolean> {
   const candidate = CANDIDATES_DATA[candidateIndex];
   if (!candidate) {
     return {};
   }
 
   if (jobIndex === 0) {
-    const years = ["3", "4", "5", "6", "7", "8+"];
+    const years = [5, 6, 7, 8, 5, 6];
     const frameworks = ["Vue", "React", "Svelte", "Vue", "React", "Vue"];
     const starts = [
       "Immediately",
@@ -7233,6 +7194,7 @@ function generateResponses(
     );
     return {
       "Link to your portfolio": `https://dribbble.com/${candidate.firstName.toLowerCase()}${candidate.lastName.toLowerCase().charAt(0)}`,
+      "Years of product design experience": 3 + (candidateIndex % 5),
       "Primary design tool": tool,
       "Walk us through your design process for a recent project": process,
       "I have experience with design systems": candidateIndex % 2 === 0,
@@ -7255,7 +7217,7 @@ function generateResponses(
       "GitHub Actions",
       "CircleCI",
     ];
-    const dockerYears = ["3", "4", "5", "6", "2", "7"];
+    const dockerYears = [3, 4, 5, 6, 3, 7];
     const i = candidateIndex % platforms.length;
     const platformList = getArrayItemOrThrow(
       platforms,
@@ -7276,6 +7238,44 @@ function generateResponses(
       "Which cloud platforms have you worked with?": platformList,
       "Years of Docker experience": dockerYear,
       "Preferred CI/CD platform": ciPlatform,
+    };
+  }
+  if (jobIndex === 3) {
+    const documentation = [
+      ["API documentation", "User guides", "Release notes"],
+      ["Deployment guides", "Tutorials"],
+      ["API documentation", "Deployment guides"],
+      ["User guides", "Tutorials", "Release notes"],
+    ];
+    const i = candidateIndex % documentation.length;
+    return {
+      "Link to a technical writing sample": `https://docs.example.com/${candidate.firstName.toLowerCase()}-${candidate.lastName.toLowerCase().replace(/['\s]/g, "-")}`,
+      "Years of technical writing experience": 2 + (candidateIndex % 5),
+      "Which documentation have you owned?": getArrayItemOrThrow(
+        documentation,
+        i,
+        "documentation ownership response",
+      ),
+      "I have worked in a docs-as-code workflow": candidateIndex % 3 !== 0,
+    };
+  }
+  if (jobIndex === 4) {
+    const technologies = [
+      ["HTML/CSS", "JavaScript", "TypeScript", "Vue"],
+      ["HTML/CSS", "JavaScript", "React"],
+      ["HTML/CSS", "JavaScript", "Vue"],
+      ["HTML/CSS", "JavaScript", "TypeScript"],
+    ];
+    const i = candidateIndex % technologies.length;
+    return {
+      "Are you currently enrolled in a degree program?": "Yes",
+      "Can you work on-site in Berlin for this internship?":
+        candidateIndex % 2 === 0
+          ? "Yes — on-site in Berlin"
+          : "Yes — I can relocate",
+      "Which frontend technologies have you used in projects?":
+        getArrayItemOrThrow(technologies, i, "frontend technologies response"),
+      "Link to a GitHub profile or frontend project": `https://github.com/${candidate.firstName.toLowerCase()}${candidate.lastName.toLowerCase().replace(/['\s]/g, "")}`,
     };
   }
   return {};
@@ -9269,11 +9269,506 @@ const APPLICATION_SOURCES_DATA: ApplicationSourceSeed[] = [
 ];
 
 // ─────────────────────────────────────────────
+// Candidate inbox conversations
+// Every pipeline status represented in a job has at least one conversation,
+// including the job's highest-scoring candidate. Only one conversation per job
+// has outbound messages so the Free demo account stays within its five-thread
+// cap; the remaining examples are candidate-originated follow-ups.
+// ─────────────────────────────────────────────
+
+interface CandidateInboxMessageSeed {
+  direction: "inbound" | "outbound";
+  subject: string;
+  bodyText: string;
+  daysAgo: number;
+  hour: number;
+  minute?: number;
+}
+
+interface CandidateInboxConversationSeed {
+  jobIndex: number;
+  candidateIndex: number;
+  unreadCount: number;
+  messages: CandidateInboxMessageSeed[];
+}
+
+function candidateFollowUp(
+  jobIndex: number,
+  candidateIndex: number,
+  subject: string,
+  bodyText: string,
+  daysAgo: number,
+  hour: number,
+  minute: number = 0,
+): CandidateInboxConversationSeed {
+  return {
+    jobIndex,
+    candidateIndex,
+    unreadCount: 1,
+    messages: [
+      {
+        direction: "inbound",
+        subject,
+        bodyText,
+        daysAgo,
+        hour,
+        minute,
+      },
+    ],
+  };
+}
+
+const CANDIDATE_INBOX_DATA: CandidateInboxConversationSeed[] = [
+  // Senior Full-Stack Engineer
+  {
+    jobIndex: 0,
+    candidateIndex: 3,
+    unreadCount: 1,
+    messages: [
+      {
+        direction: "outbound",
+        subject: "Final interview for Senior Full-Stack Engineer",
+        bodyText:
+          "Hi Noah,\n\nWe enjoyed reviewing your take-home exercise and would like to invite you to a final panel interview. Would Thursday afternoon or Friday morning work better for you?\n\nBest,\nDemo Recruiter",
+        daysAgo: 3,
+        hour: 10,
+      },
+      {
+        direction: "inbound",
+        subject: "Re: Final interview for Senior Full-Stack Engineer",
+        bodyText:
+          "Hi,\n\nGreat news, thank you! Friday at 10:00 CET works well for me. Could you let me know whether the panel will focus more on system design or team leadership?\n\nBest,\nNoah",
+        daysAgo: 2,
+        hour: 8,
+        minute: 35,
+      },
+    ],
+  },
+  {
+    jobIndex: 0,
+    candidateIndex: 8,
+    unreadCount: 1,
+    messages: [
+      {
+        direction: "inbound",
+        subject: "Additional details for my Full-Stack application",
+        bodyText:
+          "Hi Reqcore team,\n\nI wanted to add a recent project that was not yet on my CV. I led a Nuxt migration for a customer portal and documented the PostgreSQL performance work in my GitHub portfolio. Happy to walk through the trade-offs if useful.\n\nRegards,\nLucas",
+        daysAgo: 1,
+        hour: 16,
+        minute: 20,
+      },
+    ],
+  },
+  {
+    jobIndex: 0,
+    candidateIndex: 0,
+    unreadCount: 1,
+    messages: [
+      {
+        direction: "inbound",
+        subject: "Onboarding documents and start date",
+        bodyText:
+          "Hi,\n\nI have signed the remaining onboarding documents and confirmed my availability to start next Monday. Please let me know if there is anything else I should prepare before my first day. I am really looking forward to joining the engineering team.\n\nBest,\nEmma",
+        daysAgo: 1,
+        hour: 9,
+        minute: 15,
+      },
+    ],
+  },
+  candidateFollowUp(
+    0,
+    1,
+    "Questions about the Full-Stack Engineer offer",
+    "Hi,\n\nThank you again for the offer. Before I sign, could we clarify the relocation support and equity portion of the package? I am available for a quick call tomorrow afternoon.\n\nBest,\nLiam",
+    4,
+    16,
+    10,
+  ),
+  candidateFollowUp(
+    0,
+    6,
+    "Availability for an initial engineering call",
+    "Hi Reqcore team,\n\nI am available for a screening call on Tuesday or Thursday morning. I also wanted to confirm that I already have authorization to work in Germany and would not require sponsorship.\n\nBest,\nAmara",
+    6,
+    11,
+    20,
+  ),
+  candidateFollowUp(
+    0,
+    70,
+    "Additional architecture example",
+    "Hello Reqcore team,\n\nI added a short architecture note to my application describing how I split a growing TypeScript service into independently deployable modules. It includes the PostgreSQL migration plan and the trade-offs we considered.\n\nRegards,\nArjun",
+    2,
+    13,
+    15,
+  ),
+  candidateFollowUp(
+    0,
+    126,
+    "Re: Senior Full-Stack Engineer application update",
+    "Hi,\n\nThank you for reviewing my application. I understand that the role requires deeper backend ownership. I appreciate the feedback and would be interested in future frontend-focused engineering positions.\n\nBest,\nSonia",
+    9,
+    14,
+    5,
+  ),
+
+  // Product Designer
+  {
+    jobIndex: 1,
+    candidateIndex: 15,
+    unreadCount: 0,
+    messages: [
+      {
+        direction: "outbound",
+        subject: "Portfolio walkthrough — Product Designer",
+        bodyText:
+          "Hi Elena,\n\nYour case studies stood out to the team. We would love to schedule a 45-minute portfolio walkthrough next week, with a little extra time to discuss your research process. Are you available Tuesday or Wednesday afternoon?\n\nBest,\nDemo Recruiter",
+        daysAgo: 8,
+        hour: 11,
+        minute: 15,
+      },
+      {
+        direction: "inbound",
+        subject: "Re: Portfolio walkthrough — Product Designer",
+        bodyText:
+          "Hi,\n\nTuesday at 14:00 CET would be perfect. I will present the workflow redesign from my portfolio and can also share the accessibility testing that did not fit into the published case study.\n\nLooking forward to it,\nElena",
+        daysAgo: 7,
+        hour: 9,
+        minute: 5,
+      },
+    ],
+  },
+  {
+    jobIndex: 1,
+    candidateIndex: 17,
+    unreadCount: 1,
+    messages: [
+      {
+        direction: "inbound",
+        subject: "Updated prototype for my Product Designer application",
+        bodyText:
+          "Hello,\n\nI have updated the interactive prototype from my application after another round of usability testing. The new version includes the empty states and keyboard flows we discussed in my screening call. I would be glad to send over the research notes as well.\n\nThanks,\nMaria",
+        daysAgo: 4,
+        hour: 13,
+        minute: 40,
+      },
+    ],
+  },
+  {
+    jobIndex: 1,
+    candidateIndex: 150,
+    unreadCount: 1,
+    messages: [
+      {
+        direction: "inbound",
+        subject: "Additional Product Designer case study",
+        bodyText:
+          "Hello Reqcore team,\n\nI have added a new case study to my portfolio that may be especially relevant to this role. It covers how I simplified a permissions-heavy B2B workflow, evolved the design system, and measured the impact after launch. I would be happy to walk the team through the decisions behind it.\n\nBest,\nCharlotte",
+        daysAgo: 2,
+        hour: 15,
+        minute: 30,
+      },
+    ],
+  },
+  candidateFollowUp(
+    1,
+    14,
+    "Product Designer offer questions",
+    "Hi,\n\nI am delighted to receive the offer. Could you confirm the expected start date and whether the team meets in person for planning sessions? The remote setup otherwise looks ideal.\n\nBest,\nDavid",
+    6,
+    10,
+    40,
+  ),
+  candidateFollowUp(
+    1,
+    400,
+    "Portfolio walkthrough availability",
+    "Hello,\n\nI can join a portfolio walkthrough on Wednesday after 13:00 CET or Friday morning. I would like to focus on the research and validation work behind my recent enterprise workflow redesign.\n\nThanks,\nNora",
+    5,
+    15,
+    25,
+  ),
+  candidateFollowUp(
+    1,
+    388,
+    "Re: Product Designer application update",
+    "Hi,\n\nThank you for reviewing my portfolio. I understand that the role needs more experience than my current freelance background demonstrates, and I appreciate the team taking the time to consider me.\n\nBest,\nMichal",
+    10,
+    9,
+    50,
+  ),
+
+  // DevOps Engineer
+  {
+    jobIndex: 2,
+    candidateIndex: 7,
+    unreadCount: 0,
+    messages: [
+      {
+        direction: "outbound",
+        subject: "Technical interview availability — DevOps Engineer",
+        bodyText:
+          "Hi Yuki,\n\nWe would like to move you to the final technical interview. The conversation will cover deployment reliability, incident response, and a practical infrastructure design scenario. Which times work for you this week?\n\nBest,\nDemo Recruiter",
+        daysAgo: 10,
+        hour: 9,
+      },
+      {
+        direction: "inbound",
+        subject: "Re: Technical interview availability — DevOps Engineer",
+        bodyText:
+          "Hi,\n\nThank you for the update. Wednesday at 14:00 UTC works best. I can also prepare a short overview of the incident review process I introduced for my current platform team.\n\nBest regards,\nYuki",
+        daysAgo: 9,
+        hour: 7,
+        minute: 45,
+      },
+    ],
+  },
+  {
+    jobIndex: 2,
+    candidateIndex: 9,
+    unreadCount: 1,
+    messages: [
+      {
+        direction: "inbound",
+        subject: "On-call experience clarification",
+        bodyText:
+          "Hi,\n\nA quick follow-up to my DevOps application: I have been part of a six-person on-call rotation for the last two years and served as incident commander for three production incidents. I noticed that responsibility was not very clear on my CV.\n\nRegards,\nPriya",
+        daysAgo: 5,
+        hour: 17,
+        minute: 10,
+      },
+    ],
+  },
+  {
+    jobIndex: 2,
+    candidateIndex: 5,
+    unreadCount: 1,
+    messages: [
+      {
+        direction: "inbound",
+        subject: "Contract signed — DevOps Engineer",
+        bodyText:
+          "Hi,\n\nI have signed the contract and completed the security questionnaire. I can start the infrastructure review during my first week and will bring an outline for the deployment and observability audit we discussed.\n\nLooking forward to working together,\nJames",
+        daysAgo: 3,
+        hour: 12,
+        minute: 10,
+      },
+    ],
+  },
+  candidateFollowUp(
+    2,
+    6,
+    "DevOps Engineer contract details",
+    "Hi,\n\nThank you for sending the contract terms. The scope looks good to me. Could we confirm the proposed start date and how often the contractor joins the primary on-call rotation?\n\nBest,\nAmara",
+    6,
+    13,
+    35,
+  ),
+  candidateFollowUp(
+    2,
+    26,
+    "Additional certification for my DevOps application",
+    "Hello Reqcore team,\n\nI recently completed my Kubernetes administrator certification and added the credential to my application. I also included a short write-up about a backup restoration exercise I led last quarter.\n\nRegards,\nMarcus",
+    2,
+    17,
+    5,
+  ),
+  candidateFollowUp(
+    2,
+    29,
+    "Re: DevOps Engineer application update",
+    "Hi,\n\nThank you for the update and for considering my application. I understand that the role needs deeper platform ownership. I would be interested in future support engineering or junior SRE opportunities.\n\nBest,\nZara",
+    12,
+    8,
+    30,
+  ),
+
+  // Technical Writer (Part-Time)
+  {
+    jobIndex: 3,
+    candidateIndex: 12,
+    unreadCount: 0,
+    messages: [
+      {
+        direction: "outbound",
+        subject: "Reqcore Technical Writer offer",
+        bodyText:
+          "Hi Felix,\n\nWe are delighted to offer you the part-time Technical Writer role. I have sent the full terms separately. Could we arrange a short call to discuss your preferred weekly schedule and starting date?\n\nBest,\nDemo Recruiter",
+        daysAgo: 6,
+        hour: 14,
+      },
+      {
+        direction: "inbound",
+        subject: "Re: Reqcore Technical Writer offer",
+        bodyText:
+          "Hi,\n\nThank you — I am excited about the offer. Tuesday morning would be ideal for a call. My preference is to spread the hours across three days, and I could start on the first Monday next month.\n\nBest,\nFelix",
+        daysAgo: 5,
+        hour: 8,
+        minute: 25,
+      },
+      {
+        direction: "outbound",
+        subject: "Re: Reqcore Technical Writer offer",
+        bodyText:
+          "Hi Felix,\n\nThat schedule works well for us. I have booked a call for Tuesday at 09:30 CET and included the proposed onboarding plan. We can confirm the exact three-day split together then.\n\nBest,\nDemo Recruiter",
+        daysAgo: 4,
+        hour: 10,
+        minute: 5,
+      },
+    ],
+  },
+  {
+    jobIndex: 3,
+    candidateIndex: 14,
+    unreadCount: 1,
+    messages: [
+      {
+        direction: "inbound",
+        subject: "API documentation sample",
+        bodyText:
+          "Hello,\n\nI have added an API migration guide to my writing samples. It shows how I structure breaking-change notices, before-and-after examples, and troubleshooting steps for developers. I hope it gives the team a useful view of my docs-as-code approach.\n\nKind regards,\nDavid",
+        daysAgo: 11,
+        hour: 12,
+        minute: 50,
+      },
+    ],
+  },
+  candidateFollowUp(
+    3,
+    18,
+    "Technical Writer screening availability",
+    "Hi,\n\nI am available for an introductory call on Monday or Wednesday afternoon. I can also share a longer administrator guide that shows how I organize documentation for several user roles.\n\nBest,\nRyan",
+    7,
+    16,
+    15,
+  ),
+  candidateFollowUp(
+    3,
+    22,
+    "New troubleshooting guide sample",
+    "Hello Reqcore team,\n\nI have added a troubleshooting guide to my application samples. It includes diagnostic decision trees, expected command output, and separate recovery paths for hosted and self-managed installations.\n\nRegards,\nTom",
+    3,
+    11,
+    45,
+  ),
+  candidateFollowUp(
+    3,
+    28,
+    "Re: Technical Writer application update",
+    "Hi,\n\nThank you for the candid feedback. I understand that my current portfolio is weighted toward campaign writing, and I am working on more developer-focused samples. Please keep me in mind for future content roles.\n\nBest,\nKevin",
+    14,
+    10,
+    20,
+  ),
+
+  // Frontend Engineering Intern
+  {
+    jobIndex: 4,
+    candidateIndex: 2,
+    unreadCount: 0,
+    messages: [
+      {
+        direction: "outbound",
+        subject: "Team interview — Frontend Engineering Intern",
+        bodyText:
+          "Hi Sofia,\n\nWe enjoyed your first conversation and would like you to meet two frontend engineers for a 45-minute team interview. Would Monday at 15:00 CET work for you?\n\nBest,\nDemo Recruiter",
+        daysAgo: 13,
+        hour: 10,
+        minute: 30,
+      },
+      {
+        direction: "inbound",
+        subject: "Re: Team interview — Frontend Engineering Intern",
+        bodyText:
+          "Hi,\n\nMonday at 15:00 CET works for me, thank you. Should I prepare for a live coding exercise, or will the discussion focus on the projects from my application?\n\nBest,\nSofia",
+        daysAgo: 12,
+        hour: 18,
+        minute: 5,
+      },
+    ],
+  },
+  {
+    jobIndex: 4,
+    candidateIndex: 11,
+    unreadCount: 2,
+    messages: [
+      {
+        direction: "inbound",
+        subject: "Internship interview scheduling",
+        bodyText:
+          "Hi Reqcore team,\n\nThank you for moving my application forward. I am in exams until Thursday, but I am available any time on Friday or next Monday afternoon.\n\nBest,\nAisha",
+        daysAgo: 2,
+        hour: 19,
+        minute: 10,
+      },
+      {
+        direction: "inbound",
+        subject: "Re: Internship interview scheduling",
+        bodyText:
+          "One quick addition: I can come to the Berlin office for the interview if that is easier for the team.\n\nThanks,\nAisha",
+        daysAgo: 1,
+        hour: 7,
+        minute: 50,
+      },
+    ],
+  },
+  {
+    jobIndex: 4,
+    candidateIndex: 0,
+    unreadCount: 1,
+    messages: [
+      {
+        direction: "inbound",
+        subject: "Frontend internship project update",
+        bodyText:
+          "Hi Reqcore team,\n\nI wanted to share a small update before the next interview: I added keyboard navigation and component tests to the Vue project from my application. I also wrote a short note explaining the accessibility choices and what I would improve with more time.\n\nBest,\nEmma",
+        daysAgo: 3,
+        hour: 18,
+        minute: 45,
+      },
+    ],
+  },
+  candidateFollowUp(
+    4,
+    15,
+    "Frontend internship application follow-up",
+    "Hi Reqcore team,\n\nI wanted to confirm that my application came through correctly. I have also added the GitHub repository for my latest Vue project, including a short README about the component architecture.\n\nBest,\nElena",
+    4,
+    12,
+    5,
+  ),
+  candidateFollowUp(
+    4,
+    23,
+    "Re: Frontend internship application update",
+    "Hello,\n\nThank you for reviewing my application. I appreciate the note about strengthening my JavaScript fundamentals and will focus on that in my next project. I hope I can apply again in the future.\n\nRegards,\nSarah",
+    8,
+    9,
+    35,
+  ),
+];
+
+// ─────────────────────────────────────────────
 // Main Seed Function
 // ─────────────────────────────────────────────
 
 async function seed() {
   console.log("🌱 Seeding Reqcore demo data...\n");
+
+  const demoInboxData = CANDIDATE_INBOX_DATA.filter((conversation) =>
+    DEMO_APPLICATION_KEYS.has(
+      `${conversation.jobIndex}-${conversation.candidateIndex}`,
+    ),
+  );
+  const demoApplicationSources = APPLICATION_SOURCES_DATA.filter((source) =>
+    DEMO_APPLICATION_KEYS.has(`${source.jobIndex}-${source.candidateIndex}`),
+  );
+  const demoInterviews = INTERVIEWS_DATA.filter((interview) =>
+    DEMO_APPLICATION_KEYS.has(
+      `${interview.jobIndex}-${interview.candidateIndex}`,
+    ),
+  );
 
   // ─────────────────────────────────────────────
   // Clean up legacy applirank.com seed data
@@ -9440,11 +9935,18 @@ async function seed() {
   console.log(`✅ Created ${JOBS_DATA.length} jobs`);
 
   // 4. Create candidates
-  const candidateIds: string[] = [];
+  const candidateIds: Array<string | undefined> = [];
 
-  for (const candidateData of CANDIDATES_DATA) {
+  for (const candidateIndex of DEMO_CANDIDATE_INDICES) {
+    const candidateData = CANDIDATES_DATA[candidateIndex];
+    if (!candidateData) {
+      throw new Error(
+        `Missing candidate fixture at selected index ${candidateIndex}`,
+      );
+    }
+
     const candidateId = id();
-    candidateIds.push(candidateId);
+    candidateIds[candidateIndex] = candidateId;
     const createdDaysAgo = 5 + Math.floor(Math.random() * 20);
 
     await db.insert(schema.candidate).values({
@@ -9459,19 +9961,27 @@ async function seed() {
     });
   }
 
-  console.log(`✅ Created ${CANDIDATES_DATA.length} candidates`);
+  console.log(`✅ Created ${DEMO_CANDIDATE_INDICES.length} candidates`);
 
-  // 5. Create custom questions for first 3 jobs
-  const questionSets = [
-    FULLSTACK_QUESTIONS,
-    DESIGNER_QUESTIONS,
-    DEVOPS_QUESTIONS,
-  ];
-  const questionIdsByJob: Map<number, { questionId: string; label: string }[]> =
-    new Map();
+  // 5. Create custom questions and automation rules for every demo job
+  if (
+    DEMO_JOB_QUESTIONS.length !== JOBS_DATA.length ||
+    DEMO_AUTOMATION_RULES.length !== JOBS_DATA.length
+  ) {
+    throw new Error("Every demo job must have questions and automation rules");
+  }
 
-  for (let jobIndex = 0; jobIndex < questionSets.length; jobIndex++) {
-    const questions = questionSets[jobIndex];
+  const questionIdsByJob: Map<
+    number,
+    {
+      questionId: string;
+      label: string;
+      type: (typeof DEMO_JOB_QUESTIONS)[number][number]["type"];
+    }[]
+  > = new Map();
+
+  for (let jobIndex = 0; jobIndex < DEMO_JOB_QUESTIONS.length; jobIndex++) {
+    const questions = DEMO_JOB_QUESTIONS[jobIndex];
     const jobId = jobIds[jobIndex];
     if (!questions || !jobId) {
       throw new Error(
@@ -9479,7 +9989,11 @@ async function seed() {
       );
     }
 
-    const questionIds: { questionId: string; label: string }[] = [];
+    const questionIds: {
+      questionId: string;
+      label: string;
+      type: (typeof DEMO_JOB_QUESTIONS)[number][number]["type"];
+    }[] = [];
 
     for (let qi = 0; qi < questions.length; qi++) {
       const q = questions[qi];
@@ -9488,7 +10002,7 @@ async function seed() {
       }
 
       const questionId = id();
-      questionIds.push({ questionId, label: q.label });
+      questionIds.push({ questionId, label: q.label, type: q.type });
 
       await db.insert(schema.jobQuestion).values({
         id: questionId,
@@ -9497,7 +10011,7 @@ async function seed() {
         type: q.type,
         label: q.label,
         required: q.required,
-        options: "options" in q ? q.options : null,
+        options: q.options ?? null,
         displayOrder: qi,
         createdAt: daysAgo(18),
         updatedAt: daysAgo(18),
@@ -9507,7 +10021,66 @@ async function seed() {
     questionIdsByJob.set(jobIndex, questionIds);
   }
 
-  console.log(`✅ Created custom questions for ${questionSets.length} jobs`);
+  console.log(`✅ Created custom questions for ${DEMO_JOB_QUESTIONS.length} jobs`);
+
+  let totalAutomationRules = 0;
+
+  for (let jobIndex = 0; jobIndex < DEMO_AUTOMATION_RULES.length; jobIndex++) {
+    const rules = DEMO_AUTOMATION_RULES[jobIndex];
+    const jobId = jobIds[jobIndex];
+    const questions = questionIdsByJob.get(jobIndex);
+    if (!rules || !jobId || !questions) {
+      throw new Error(
+        `Invalid automation seed configuration at job index ${jobIndex}`,
+      );
+    }
+
+    const questionsByLabel = new Map(questions.map((q) => [q.label, q]));
+
+    for (let displayOrder = 0; displayOrder < rules.length; displayOrder++) {
+      const rule = rules[displayOrder];
+      if (!rule) continue;
+
+      const conditions = rule.conditions.map((condition) => {
+        const question = questionsByLabel.get(condition.questionLabel);
+        if (!question) {
+          throw new Error(
+            `Automation rule "${rule.name}" references missing question "${condition.questionLabel}"`,
+          );
+        }
+        if (question.type !== condition.questionType) {
+          throw new Error(
+            `Automation rule "${rule.name}" expects "${condition.questionLabel}" to be ${condition.questionType}, got ${question.type}`,
+          );
+        }
+
+        return {
+          questionId: question.questionId,
+          operator: condition.operator,
+          ...(condition.value !== undefined ? { value: condition.value } : {}),
+        };
+      });
+
+      await db.insert(schema.applicationRule).values({
+        id: id(),
+        organizationId: orgId,
+        jobId,
+        name: rule.name,
+        matchType: rule.matchType,
+        action: rule.action,
+        enabled: rule.enabled,
+        conditions,
+        displayOrder,
+        createdAt: daysAgo(17),
+        updatedAt: daysAgo(17),
+      });
+      totalAutomationRules++;
+    }
+  }
+
+  console.log(
+    `✅ Created ${totalAutomationRules} automation rules across ${JOBS_DATA.length} jobs`,
+  );
 
   // 6. Create applications with status distribution
   let totalApps = 0;
@@ -9576,10 +10149,161 @@ async function seed() {
     `✅ Created ${totalApps} applications with pipeline distribution`,
   );
 
-  // 6b. Create tracking links and application source attribution
-  const trackingLinkIds: string[] = [];
+  // 6b. Create candidate inbox conversations and messages
+  let totalCandidateMessages = 0;
 
-  for (const link of TRACKING_LINKS_DATA) {
+  for (let jobIndex = 0; jobIndex < JOBS_DATA.length; jobIndex++) {
+    const conversationCount = demoInboxData.filter(
+      (item) => item.jobIndex === jobIndex,
+    ).length;
+    if (conversationCount < 2) {
+      throw new Error(
+        `Demo job ${jobIndex} must have at least two candidate inbox conversations`,
+      );
+    }
+
+    const jobApplications = JOB_APPLICATIONS[jobIndex];
+    if (!jobApplications) {
+      throw new Error(`Missing demo applications for job ${jobIndex}`);
+    }
+    const applicationStatuses = new Set(
+      jobApplications.map((application) => application.status),
+    );
+    for (const status of applicationStatuses) {
+      const hasInboxConversation = jobApplications.some(
+        (application) =>
+          application.status === status &&
+          demoInboxData.some(
+            (item) =>
+              item.jobIndex === jobIndex &&
+              item.candidateIndex === application.candidateIndex,
+          ),
+      );
+      if (!hasInboxConversation) {
+        throw new Error(
+          `Demo job ${jobIndex} must have an inbox conversation for status ${status}`,
+        );
+      }
+    }
+
+    const highestScore = Math.max(
+      ...jobApplications.map((application) => application.score ?? -Infinity),
+    );
+    const highestScoringCandidates = jobApplications.filter(
+      (application) => application.score === highestScore,
+    );
+    for (const application of highestScoringCandidates) {
+      const hasInboxConversation = demoInboxData.some(
+        (item) =>
+          item.jobIndex === jobIndex &&
+          item.candidateIndex === application.candidateIndex,
+      );
+      if (!hasInboxConversation) {
+        throw new Error(
+          `Highest-scoring candidate ${application.candidateIndex} for demo job ${jobIndex} must have an inbox conversation`,
+        );
+      }
+    }
+  }
+
+  for (const conversationData of demoInboxData) {
+    const applicationId = applicationMap.get(
+      `${conversationData.jobIndex}-${conversationData.candidateIndex}`,
+    );
+    const candidateData = CANDIDATES_DATA[conversationData.candidateIndex];
+
+    if (!applicationId || !candidateData) {
+      throw new Error(
+        `Invalid candidate inbox seed for job ${conversationData.jobIndex}, candidate ${conversationData.candidateIndex}`,
+      );
+    }
+    if (conversationData.messages.length === 0) {
+      throw new Error(
+        `Candidate inbox seed has no messages for job ${conversationData.jobIndex}, candidate ${conversationData.candidateIndex}`,
+      );
+    }
+    const inboundMessageCount = conversationData.messages.filter(
+      (message) => message.direction === "inbound",
+    ).length;
+    if (conversationData.unreadCount > inboundMessageCount) {
+      throw new Error(
+        `Candidate inbox unread count exceeds inbound messages for job ${conversationData.jobIndex}, candidate ${conversationData.candidateIndex}`,
+      );
+    }
+
+    const conversationId = id();
+    const messageDates = conversationData.messages.map((message) =>
+      dateWithOffset(-message.daysAgo, message.hour, message.minute ?? 0),
+    );
+    const firstMessageAt = messageDates[0];
+    const lastMessageAt = messageDates.at(-1);
+
+    if (!firstMessageAt || !lastMessageAt) {
+      throw new Error("Candidate inbox message dates could not be generated");
+    }
+
+    await db.insert(schema.candidateConversation).values({
+      id: conversationId,
+      organizationId: orgId,
+      applicationId,
+      replyToken: id().replaceAll("-", ""),
+      unreadCount: conversationData.unreadCount,
+      lastMessageAt,
+      createdAt: firstMessageAt,
+      updatedAt: lastMessageAt,
+    });
+
+    for (
+      let messageIndex = 0;
+      messageIndex < conversationData.messages.length;
+      messageIndex++
+    ) {
+      const message = conversationData.messages[messageIndex];
+      const messageAt = messageDates[messageIndex];
+      if (!message || !messageAt) continue;
+
+      const outbound = message.direction === "outbound";
+      await db.insert(schema.candidateMessage).values({
+        id: id(),
+        organizationId: orgId,
+        conversationId,
+        direction: message.direction,
+        status: "delivered",
+        fromEmail: outbound ? DEMO_EMAIL : candidateData.email,
+        toEmail: outbound ? candidateData.email : DEMO_EMAIL,
+        subject: message.subject,
+        bodyText: message.bodyText,
+        sentById: outbound ? userId : null,
+        providerStatusAt: messageAt,
+        sentAt: messageAt,
+        deliveredAt: messageAt,
+        createdAt: messageAt,
+        updatedAt: messageAt,
+      });
+      totalCandidateMessages++;
+    }
+  }
+
+  console.log(
+    `✅ Created ${totalCandidateMessages} candidate inbox messages across ${demoInboxData.length} conversations`,
+  );
+
+  // 6c. Create tracking links and application source attribution
+  const trackingLinkIds: string[] = [];
+  const selectedApplicationsPerTrackingLink = new Map<number, number>();
+
+  for (const source of demoApplicationSources) {
+    if (source.trackingLinkIndex === null) continue;
+    selectedApplicationsPerTrackingLink.set(
+      source.trackingLinkIndex,
+      (selectedApplicationsPerTrackingLink.get(source.trackingLinkIndex) ?? 0) +
+        1,
+    );
+  }
+
+  for (let linkIndex = 0; linkIndex < TRACKING_LINKS_DATA.length; linkIndex++) {
+    const link = TRACKING_LINKS_DATA[linkIndex];
+    if (!link) continue;
     const trackingLinkId = id();
     trackingLinkIds.push(trackingLinkId);
 
@@ -9596,7 +10320,7 @@ async function seed() {
       utmTerm: link.utmTerm ?? null,
       utmContent: link.utmContent ?? null,
       clickCount: link.clickCount,
-      applicationCount: link.applicationCount,
+      applicationCount: selectedApplicationsPerTrackingLink.get(linkIndex) ?? 0,
       isActive: link.isActive,
       createdById: userId,
       createdAt: daysAgo(link.daysAgoCreated),
@@ -9613,7 +10337,7 @@ async function seed() {
   // Create application source records for attributed applications
   let totalSources = 0;
 
-  for (const src of APPLICATION_SOURCES_DATA) {
+  for (const src of demoApplicationSources) {
     const applicationId = applicationMap.get(
       `${src.jobIndex}-${src.candidateIndex}`,
     );
@@ -9648,10 +10372,10 @@ async function seed() {
 
   // Compute source distribution for logging
   const channelCounts: Record<string, number> = {};
-  for (const src of APPLICATION_SOURCES_DATA) {
+  for (const src of demoApplicationSources) {
     channelCounts[src.channel] = (channelCounts[src.channel] || 0) + 1;
   }
-  const trackedCount = APPLICATION_SOURCES_DATA.filter(
+  const trackedCount = demoApplicationSources.filter(
     (s) => s.trackingLinkIndex !== null,
   ).length;
 
@@ -9836,7 +10560,7 @@ async function seed() {
   let totalInterviews = 0;
   const interviewIds: string[] = []; // track IDs for activity log
 
-  for (const iv of INTERVIEWS_DATA) {
+  for (const iv of demoInterviews) {
     const applicationId = applicationMap.get(
       `${iv.jobIndex}-${iv.candidateIndex}`,
     );
@@ -10000,8 +10724,8 @@ async function seed() {
   }
 
   // --- Interview creation activities ---
-  for (let i = 0; i < INTERVIEWS_DATA.length; i++) {
-    const iv = INTERVIEWS_DATA[i];
+  for (let i = 0; i < demoInterviews.length; i++) {
+    const iv = demoInterviews[i];
     const interviewId = interviewIds[i];
     if (!iv || !interviewId) continue;
 

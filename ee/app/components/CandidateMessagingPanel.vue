@@ -7,7 +7,7 @@ import {
   CANDIDATE_MESSAGE_MAX_ATTACHMENTS,
 } from '~~/shared/candidate-messaging'
 import { candidateMessageKindLabel } from '../composables/useCandidateMessages'
-import type { CandidateConversation, CandidateMessageStatus } from '../composables/useCandidateMessages'
+import type { CandidateConversation, CandidateMessageStatus, CandidateMessageSummary } from '../composables/useCandidateMessages'
 
 const props = defineProps<{
   applicationId: string
@@ -47,8 +47,34 @@ const isSending = ref(false)
 
 const loading = computed(() => loadingList.value || loadingConversation.value)
 const hasConversation = computed(() => selected.value?.applicationId === props.applicationId)
-const messages = computed(() => hasConversation.value ? selected.value!.messages : [])
+
+// The panel is remounted per candidate, so a switch always starts from empty.
+// `hasSettled` marks the first load for *this* candidate as finished: until
+// then we don't know whether there is a thread, and rendering the "start a
+// conversation" composer on a guess makes the subject field flash in and back
+// out under the new candidate's header.
+const hasSettled = ref(false)
+
+// The inbox list already carries each conversation's messages, so we can paint
+// the thread as soon as that first request lands instead of waiting on the
+// second (full conversation) round trip. Per-message extras — attachments,
+// delivery errors — fill in a moment later.
+type ThreadMessage = CandidateMessageSummary
+  & Partial<Omit<CandidateConversation['messages'][number], keyof CandidateMessageSummary>>
+const previewMessages = ref<ThreadMessage[]>([])
+
+const messages = computed<ThreadMessage[]>(() =>
+  hasConversation.value ? selected.value!.messages : previewMessages.value,
+)
+// True once we know this candidate has a thread — from either request.
+const hasThread = computed(() => hasConversation.value || previewMessages.value.length > 0)
 const defaultSubject = computed(() => `Regarding ${props.jobTitle}`)
+
+const messageSkeletons = [
+  { id: 1, outbound: false, height: 'h-16' },
+  { id: 2, outbound: true, height: 'h-24' },
+  { id: 3, outbound: false, height: 'h-12' },
+]
 
 const inboxLink = computed(() => localePath({
   path: '/dashboard/inbox',
@@ -72,8 +98,10 @@ async function loadThread(options: { quiet?: boolean } = {}) {
     await loadInbox({ applicationId: props.applicationId })
     const conversation = conversations.value.find(item => item.applicationId === props.applicationId)
     if (conversation) {
+      previewMessages.value = conversation.messages
       await loadConversation(conversation.id)
     } else {
+      previewMessages.value = []
       selected.value = null
       subject.value ||= defaultSubject.value
     }
@@ -81,6 +109,8 @@ async function loadThread(options: { quiet?: boolean } = {}) {
     if (!options.quiet) {
       toast.error('Could not load messages', { message: err.data?.statusMessage })
     }
+  } finally {
+    hasSettled.value = true
   }
 }
 
@@ -90,7 +120,7 @@ async function refreshThread() {
 
 async function submitMessage() {
   const trimmedBody = body.value.trim()
-  const messageSubject = hasConversation.value
+  const messageSubject = hasThread.value
     ? messages.value.at(-1)?.subject ?? defaultSubject.value
     : subject.value.trim()
   if (!trimmedBody || !messageSubject) return
@@ -116,7 +146,7 @@ async function submitMessage() {
   }
 }
 
-async function retryMessage(message: CandidateConversation['messages'][number]) {
+async function retryMessage(message: ThreadMessage) {
   isSending.value = true
   try {
     if (message.interviewId) {
@@ -171,9 +201,24 @@ onUnmounted(() => clearInterval(pollTimer))
 
   <div v-else class="flex h-full min-h-0 min-w-0 flex-col gap-4 overflow-hidden">
     <div class="scrollbar-thin min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden pr-1">
-      <div v-if="!billingResolved || (loading && messages.length === 0)" class="py-12 text-center text-surface-400">
-        <div class="mx-auto mb-3 size-6 animate-spin rounded-full border-2 border-brand-200 border-t-brand-600 dark:border-brand-800 dark:border-t-brand-400" />
-        <p class="text-sm">Loading messages…</p>
+      <!-- Thread-shaped placeholder: the same bubble rhythm the messages land
+           in, so the panel settles into place instead of swapping layouts. -->
+      <div
+        v-if="!billingResolved || (!hasSettled && messages.length === 0)"
+        class="flex min-w-0 animate-pulse flex-col gap-5"
+        aria-label="Loading messages"
+      >
+        <div v-for="bubble in messageSkeletons" :key="bubble.id" class="flex min-w-0 flex-col" :class="bubble.outbound ? 'items-end' : 'items-start'">
+          <div class="mb-1.5 h-3 w-16 rounded bg-surface-200/80 dark:bg-surface-800" />
+          <div
+            class="w-full max-w-[88%] rounded-xl sm:max-w-[76%]"
+            :class="[
+              bubble.height,
+              bubble.outbound ? 'bg-brand-100 dark:bg-brand-950/50' : 'border border-surface-200/80 bg-white dark:border-surface-800/60 dark:bg-surface-900',
+            ]"
+          />
+          <div class="mt-1.5 h-3 w-24 rounded bg-surface-200/60 dark:bg-surface-800/70" />
+        </div>
       </div>
 
       <div
@@ -222,7 +267,7 @@ onUnmounted(() => clearInterval(pollTimer))
               : 'border border-surface-200/80 bg-white text-surface-800 shadow-sm shadow-surface-900/[0.03] dark:border-surface-800/60 dark:bg-surface-900 dark:text-surface-200 dark:shadow-none'"
           >{{ message.bodyText }}</div>
           <CandidateMessageAttachmentList
-            :attachments="message.attachments"
+            :attachments="message.attachments ?? []"
             :outbound="message.direction === 'outbound'"
           />
           <div class="mt-1.5 flex max-w-[88%] flex-wrap items-center gap-2 px-1 text-xs text-surface-400 sm:max-w-[76%]">
@@ -231,7 +276,7 @@ onUnmounted(() => clearInterval(pollTimer))
               <component :is="statusMeta[message.status].icon" class="size-3.5" :class="statusMeta[message.status].class" />
               <span :class="statusMeta[message.status].class">{{ statusMeta[message.status].label }}</span>
               <button
-                v-if="['failed', 'bounced'].includes(message.status)"
+                v-if="hasConversation && ['failed', 'bounced'].includes(message.status)"
                 type="button"
                 class="font-medium text-brand-600 hover:underline disabled:opacity-50 dark:text-brand-400"
                 :disabled="isSending"
@@ -248,11 +293,11 @@ onUnmounted(() => clearInterval(pollTimer))
     </div>
 
     <form
-      v-if="hasConversation || allowance.canSend"
+      v-if="!hasSettled || hasThread || allowance.canSend"
       class="w-full min-w-0 shrink-0 rounded-xl border border-surface-200 bg-white p-4 shadow-sm dark:border-surface-800 dark:bg-surface-900"
       @submit.prevent="submitMessage"
     >
-      <label v-if="!hasConversation" class="mb-2 block">
+      <label v-if="hasSettled && !hasThread" class="mb-2 block">
         <span class="sr-only">Subject</span>
         <input
           v-model="subject"
@@ -286,7 +331,7 @@ onUnmounted(() => clearInterval(pollTimer))
         <textarea
           v-model="body"
           maxlength="20000"
-          :placeholder="hasConversation ? 'Write a reply…' : 'Write a message…'"
+          :placeholder="hasThread ? 'Write a reply…' : 'Write a message…'"
           class="min-w-0 flex-1 resize-none rounded-lg border border-surface-200 bg-white px-3.5 py-2.5 text-sm leading-relaxed text-surface-800 transition-[height] placeholder:text-surface-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 dark:border-surface-700 dark:bg-surface-800 dark:text-surface-100 dark:placeholder:text-surface-500 dark:focus:border-brand-400 dark:focus:ring-brand-400/20"
           :class="expanded ? 'h-44' : 'h-11'"
           @input="requestId = null"
@@ -305,7 +350,7 @@ onUnmounted(() => clearInterval(pollTimer))
         <button
           type="submit"
           class="inline-flex h-11 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-brand-600 px-4 text-sm font-semibold text-white transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-brand-500 dark:hover:bg-brand-400"
-          :disabled="isSending || !body.trim() || (!hasConversation && !subject.trim())"
+          :disabled="isSending || !hasSettled || !body.trim() || (!hasThread && !subject.trim())"
         >
           <RefreshCw v-if="isSending" class="size-4 animate-spin" />
           <Send v-else class="size-4" />
@@ -314,7 +359,7 @@ onUnmounted(() => clearInterval(pollTimer))
       </div>
       <div class="mt-2.5 flex items-end justify-between gap-3 px-1">
         <p class="min-w-0 break-words px-0.5 text-[11px] text-surface-400 [overflow-wrap:anywhere] dark:text-surface-500">
-          <template v-if="allowance.remaining != null && !hasConversation"><span class="font-semibold text-surface-500 dark:text-surface-400">{{ allowance.remaining }} of {{ allowance.limit }} free conversations left.</span> Starting this uses one; replies stay unlimited. </template>
+          <template v-if="hasSettled && allowance.remaining != null && !hasThread"><span class="font-semibold text-surface-500 dark:text-surface-400">{{ allowance.remaining }} of {{ allowance.limit }} free conversations left.</span> Starting this uses one; replies stay unlimited. </template>
           Messages are emailed to {{ candidateEmail }}. <kbd class="rounded border border-surface-200 bg-surface-50 px-1 py-px font-mono text-[10px] font-medium text-surface-500 dark:border-surface-700 dark:bg-surface-800 dark:text-surface-400">⌘</kbd><kbd class="rounded border border-surface-200 bg-surface-50 px-1 py-px font-mono text-[10px] font-medium text-surface-500 dark:border-surface-700 dark:bg-surface-800 dark:text-surface-400">Enter</kbd> to send.
         </p>
         <div class="flex shrink-0 items-center gap-1">
