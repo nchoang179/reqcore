@@ -66,6 +66,19 @@ jobs:
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
+      # Classifies the token before anything else can fail ambiguously.
+      # An account/team token prints the signed-in user here; a project-scoped
+      # token (which cannot see PR environments) errors instead.
+      - name: Identify the Railway token
+        run: |
+          set -uo pipefail
+          if railway whoami; then
+            echo "Token is account/team scoped — correct for this workflow."
+          else
+            echo "::error::RAILWAY_API_TOKEN is not an account/team token. Project-scoped tokens are pinned to one environment and cannot see PR environments. Create one at Railway → Account Settings → Tokens (no environment picker) and re-run: gh secret set RAILWAY_API_TOKEN"
+            exit 1
+          fi
+
       - name: Wait for the PR environment and link to it
         id: env
         run: |
