@@ -304,7 +304,9 @@ Configure these variables through `.env`, Docker Compose, or your hosting provid
 | `BETTER_AUTH_SECRET` | Random secret, at least 32 characters |
 | `BETTER_AUTH_URL` | Public URL of your deployment |
 
-PR environments need no `BETTER_AUTH_URL` setup. A PR environment inherits the base environment's variables, so its `BETTER_AUTH_URL` points at production; auth detects this (environment name looks like a preview, and the value's host differs from `RAILWAY_PUBLIC_DOMAIN`) and uses the PR deployment's own domain instead. The only requirement is that the PR service *has* a domain. Railway clones domains into PR environments only when the base environment's service has a Railway-generated `*.up.railway.app` domain, not just a custom one.
+PR environments need no `BETTER_AUTH_URL` setup. A PR environment inherits the base environment's variables, so its `BETTER_AUTH_URL` points at production; auth detects this (environment name looks like a preview, and the value's host differs from `RAILWAY_PUBLIC_DOMAIN`) and uses the PR deployment's own domain instead. The only requirement is that the PR service *has* a domain, and Railway handles that by cloning the production service's domains into each new PR environment.
+
+This works only because the production service has a Railway-generated `*.up.railway.app` service domain alongside its custom domains — Railway clones *service* domains, so a service with custom domains only gives it nothing to clone, and PR environments come up unreachable. Note also that `RAILWAY_PUBLIC_DOMAIN` is injected at container start, so a domain added after a deploy needs a redeploy before the app can see it.
 ## Local Development Services
 
 | Service | URL | Purpose |

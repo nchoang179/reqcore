@@ -145,6 +145,8 @@ const {
   headers: useRequestHeaders(['cookie']),
 })
 
+const { markViewedLocally, isViewed } = useApplicationViews()
+
 const applications = computed(() => appData.value?.data ?? [])
 const focusedApplicationTotal = computed(() => appData.value?.total ?? 0)
 const totalPages = computed(() => Math.max(1, Math.ceil(focusedApplicationTotal.value / PIPELINE_PAGE_SIZE)))
@@ -524,6 +526,9 @@ watch(currentApplicationId, () => {
 watch(currentApplicationId, async (id) => {
   if (!id) return
   await executeDetailFetch()
+  // The detail request is what logs the view server-side; mirror it locally so
+  // the sidebar's "not viewed" dot clears without waiting for a list refetch.
+  markViewedLocally(id)
 }, { immediate: true })
 
 async function loadTimeline() {
@@ -1787,8 +1792,18 @@ function closeDocPreview() {
                 {{ getCandidateInitials(app.candidateFirstName, app.candidateLastName) }}
               </div>
               <div class="min-w-0 flex-1">
-                <p class="truncate text-sm font-medium text-surface-900 dark:text-surface-100">
-                  {{ formatPersonName(app.candidateFirstName, app.candidateLastName) }}
+                <p
+                  class="flex items-center gap-1.5 truncate text-sm text-surface-900 dark:text-surface-100"
+                  :class="isViewed(app) ? 'font-medium' : 'font-semibold'"
+                >
+                  <!-- Unread-mail convention: the dot marks applicants this
+                       recruiter has never opened. -->
+                  <span
+                    v-if="!isViewed(app)"
+                    class="size-1.5 shrink-0 rounded-full bg-brand-500 dark:bg-brand-400"
+                    title="You haven't viewed this applicant yet"
+                  />
+                  <span class="truncate">{{ formatPersonName(app.candidateFirstName, app.candidateLastName) }}</span>
                 </p>
                 <p class="mt-0.5 block truncate text-xs text-surface-500 dark:text-surface-400">{{ app.candidateEmail }}</p>
                 <div class="mt-1.5 flex items-center gap-2">
@@ -2938,8 +2953,16 @@ function closeDocPreview() {
               {{ getCandidateInitials(app.candidateFirstName, app.candidateLastName) }}
             </div>
             <div class="min-w-0 text-left">
-              <p class="text-xs font-medium text-surface-800 dark:text-surface-100 truncate">
-                {{ app.candidateFirstName }}
+              <p
+                class="flex items-center gap-1 text-xs text-surface-800 dark:text-surface-100 truncate"
+                :class="isViewed(app) ? 'font-medium' : 'font-semibold'"
+              >
+                <span
+                  v-if="!isViewed(app)"
+                  class="size-1.5 shrink-0 rounded-full bg-brand-500 dark:bg-brand-400"
+                  title="You haven't viewed this applicant yet"
+                />
+                <span class="truncate">{{ app.candidateFirstName }}</span>
               </p>
               <div class="flex items-center gap-1 mt-0.5">
                 <span

@@ -265,6 +265,29 @@ export const application = pgTable('application', {
 ]))
 
 /**
+ * Read receipt: one row the first time a member opens an application's detail,
+ * `viewedAt` bumped on every later open. Per user, not per organization — a
+ * colleague reviewing a candidate doesn't clear it off your own "not reviewed
+ * yet" list, the same way a teammate reading an email doesn't mark yours read.
+ *
+ * Written from the application detail endpoint rather than the client, so a view
+ * is logged wherever the detail is rendered (pipeline, table drawer, full page).
+ */
+export const applicationView = pgTable('application_view', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  organizationId: text('organization_id').notNull().references(() => organization.id, { onDelete: 'cascade' }),
+  applicationId: text('application_id').notNull().references(() => application.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  viewedAt: timestamp('viewed_at').notNull().defaultNow(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+}, (t) => ([
+  uniqueIndex('application_view_application_user_idx').on(t.applicationId, t.userId),
+  // Drives the per-job "not reviewed yet" counts: every unviewed lookup is
+  // "which of this user's org rows exist".
+  index('application_view_org_user_idx').on(t.organizationId, t.userId),
+]))
+
+/**
  * Documents stored in MinIO (resumes, cover letters, etc.).
  * `storageKey` is the S3 object key in the bucket.
  * `parsedContent` holds the structured JSON output from PDF parsing.
@@ -1258,6 +1281,13 @@ export const applicationRelations = relations(application, ({ one, many }) => ({
   analysisRuns: many(analysisRun),
   source: one(applicationSource),
   conversation: one(candidateConversation),
+  views: many(applicationView),
+}))
+
+export const applicationViewRelations = relations(applicationView, ({ one }) => ({
+  organization: one(organization, { fields: [applicationView.organizationId], references: [organization.id] }),
+  application: one(application, { fields: [applicationView.applicationId], references: [application.id] }),
+  user: one(user, { fields: [applicationView.userId], references: [user.id] }),
 }))
 
 export const documentRelations = relations(document, ({ one }) => ({

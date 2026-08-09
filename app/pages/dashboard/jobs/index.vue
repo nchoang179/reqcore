@@ -193,6 +193,17 @@ function hasNoApplicants(pipeline: any) {
   return totalActive(pipeline) + (pipeline?.rejected ?? 0) === 0
 }
 
+/**
+ * Applicants on this job the signed-in user has never opened (server-side read
+ * receipts, see server/utils/applicationViews.ts). This — not the size of the
+ * `new` stage — is what "needs attention" means: a stack of 224 applications
+ * someone has already read through isn't a to-do, and moving candidates along
+ * the pipeline is a separate decision from having looked at them.
+ */
+function unviewedCount(j: any): number {
+  return j?.unviewed ?? 0
+}
+
 const sortedJobs = computed(() => {
   const list = [...filteredJobs.value]
   if (sortKey.value !== 'created' || sortDir.value !== 'desc') {
@@ -218,9 +229,9 @@ const sortedJobs = computed(() => {
     const aPriority = statusPriority[a.status] ?? 9
     const bPriority = statusPriority[b.status] ?? 9
     if (aPriority !== bPriority) return aPriority - bPriority
-    const aNew = a.pipeline?.new ?? 0
-    const bNew = b.pipeline?.new ?? 0
-    if (aNew !== bNew) return bNew - aNew
+    const aUnviewed = unviewedCount(a)
+    const bUnviewed = unviewedCount(b)
+    if (aUnviewed !== bUnviewed) return bUnviewed - aUnviewed
     const aActive = totalActive(a.pipeline)
     const bActive = totalActive(b.pipeline)
     if (aActive !== bActive) return bActive - aActive
@@ -234,11 +245,11 @@ const sortedJobs = computed(() => {
 // ─────────────────────────────────────────────
 
 const jobsNeedingAttention = computed(() =>
-  sortedJobs.value.filter(j => j.status === 'open' && (j.pipeline?.new ?? 0) > 0),
+  sortedJobs.value.filter(j => j.status === 'open' && unviewedCount(j) > 0),
 )
 
 const otherJobs = computed(() =>
-  sortedJobs.value.filter(j => !(j.status === 'open' && (j.pipeline?.new ?? 0) > 0)),
+  sortedJobs.value.filter(j => !(j.status === 'open' && unviewedCount(j) > 0)),
 )
 
 // ─────────────────────────────────────────────
@@ -687,10 +698,11 @@ const noResults = computed(() => !isEmpty.value && filteredJobs.value.length ===
                     </NuxtLink>
                     <TestJobBadge v-if="j.isTest" />
                     <span
-                      v-if="(j.pipeline?.new ?? 0) > 0"
+                      v-if="unviewedCount(j) > 0"
                       class="inline-flex items-center justify-center rounded-full bg-warning-100 dark:bg-warning-900/40 text-warning-700 dark:text-warning-400 text-[10px] font-bold px-1.5 py-0.5 shrink-0"
+                      :title="`${unviewedCount(j)} applicant${unviewedCount(j) === 1 ? '' : 's'} you haven't opened yet`"
                     >
-                      {{ j.pipeline.new }} new
+                      {{ unviewedCount(j) }} unviewed
                     </span>
                     <DeleteTestJobButton v-if="j.isTest" :job-id="j.id" class="ml-auto" />
                   </div>
@@ -750,7 +762,7 @@ const noResults = computed(() => !isEmpty.value && filteredJobs.value.length ===
             :key="j.id"
             :to="localePath(`/dashboard/jobs/${j.id}`)"
             class="group rounded-xl border bg-white dark:bg-surface-900 p-4 flex flex-col gap-3 hover:shadow-md transition-all no-underline"
-            :class="(j.pipeline?.new ?? 0) > 0
+            :class="unviewedCount(j) > 0
               ? 'border-warning-200 dark:border-warning-900/60 hover:border-warning-300 dark:hover:border-warning-800'
               : 'border-surface-200 dark:border-surface-800 hover:border-surface-300 dark:hover:border-surface-700'"
           >
@@ -801,11 +813,11 @@ const noResults = computed(() => !isEmpty.value && filteredJobs.value.length ===
 
             <!-- Attention bar -->
             <div
-              v-if="(j.pipeline?.new ?? 0) > 0"
+              v-if="unviewedCount(j) > 0"
               class="flex items-center justify-between gap-2 -mx-4 -mb-4 px-4 py-2 rounded-b-xl bg-warning-50/60 dark:bg-warning-950/30 border-t border-warning-100 dark:border-warning-900/30"
             >
               <span class="text-xs font-medium text-warning-700 dark:text-warning-400">
-                {{ j.pipeline.new }} new application{{ j.pipeline.new === 1 ? '' : 's' }}
+                {{ unviewedCount(j) }} applicant{{ unviewedCount(j) === 1 ? '' : 's' }} you haven't viewed
               </span>
               <span class="inline-flex items-center gap-1 text-xs text-brand-600 dark:text-brand-400 font-medium">
                 <Kanban class="size-3" />
@@ -907,7 +919,7 @@ const noResults = computed(() => !isEmpty.value && filteredJobs.value.length ===
               <!-- Action bar -->
               <div class="flex items-center gap-2 px-5 py-3 bg-warning-50/50 dark:bg-warning-950/20 border-t border-warning-100 dark:border-warning-900/30">
                 <span class="text-xs font-medium text-warning-700 dark:text-warning-400 mr-auto">
-                  {{ j.pipeline.new }} new application{{ j.pipeline.new === 1 ? '' : 's' }} to review
+                  {{ unviewedCount(j) }} applicant{{ unviewedCount(j) === 1 ? '' : 's' }} you haven't viewed yet
                 </span>
                 <NuxtLink
                   :to="$localePath(`/dashboard/jobs/${j.id}`)"

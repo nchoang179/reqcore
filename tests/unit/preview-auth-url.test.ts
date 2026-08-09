@@ -52,6 +52,30 @@ describe('isStaleInheritedPreviewUrl', () => {
     expect(isStale('https://app.reqcore.com', undefined)).toBe(false)
   })
 
+  it('fires on RAILWAY_GIT_PR_NUMBER even when the env is named after the branch', async () => {
+    const isStale = await loadIsStale({
+      RAILWAY_ENVIRONMENT_NAME: 'fix/inbound-reply-address-history',
+      RAILWAY_GIT_PR_NUMBER: '265',
+    })
+
+    expect(isStale('https://app.reqcore.com', 'applirank-reqcore-pr-265.up.railway.app')).toBe(
+      true,
+    )
+  })
+
+  // Real values observed in the applirank project: the environment is named
+  // "reqcore-pr-<N>" (not "pr-<N>"), and RAILWAY_GIT_PR_NUMBER is NOT injected,
+  // so detection has to survive on the environment name alone.
+  it('detects the real Railway PR environment naming without RAILWAY_GIT_PR_NUMBER', async () => {
+    const isStale = await loadIsStale({
+      RAILWAY_ENVIRONMENT_NAME: 'reqcore-pr-266',
+    })
+
+    expect(
+      isStale('https://app.reqcore.com', 'applirank-reqcore-pr-266.up.railway.app'),
+    ).toBe(true)
+  })
+
   it('discards an unparseable inherited value in a PR environment', async () => {
     const isStale = await loadIsStale({
       RAILWAY_ENVIRONMENT_NAME: 'pr-264',

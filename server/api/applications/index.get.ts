@@ -204,10 +204,14 @@ export default defineEventHandler(async (event) => {
         .where(and(eq(interview.organizationId, orgId), inArray(interview.applicationId, ids)))
     : []
   const interviewedIds = new Set(interviewedApplicationIds.map(row => row.applicationId))
+  // Read receipts for the signed-in user only — "viewed" is personal, so a
+  // colleague's review doesn't clear the marker off your list.
+  const viewedAt = await viewedAtByApplication({ userId: session.user.id, applicationIds: ids })
   const enriched = data.map((a) => ({
     ...a,
     properties: propertyMap.get(a.id) ?? [],
     hasInterview: interviewedIds.has(a.id),
+    viewedAt: viewedAt.get(a.id) ?? null,
   }))
 
   return {
