@@ -1,5 +1,6 @@
 import { and, eq, inArray, isNull, ne, notInArray, count, sql } from 'drizzle-orm'
 import { application, applicationView, candidate } from '../database/schema'
+import { isDemoOrgId } from './demoOrg'
 
 /**
  * Log that a member opened an application. Idempotent per (application, user):
@@ -7,12 +8,31 @@ import { application, applicationView, candidate } from '../database/schema'
  *
  * Fire-and-forget like recordActivity — a read receipt must never be the reason
  * a recruiter can't open a candidate.
+ *
+ * Skipped entirely for the demo org. The receipt is written from a GET, so
+ * `demo-guard` (which only inspects write verbs) never sees it — without this
+ * the read-only demo would still accumulate rows. Skipping also keeps the
+ * feature demonstrable: every visitor shares `demo@reqcore.com`, so a stored
+ * receipt would mark a candidate read for everyone who came after. Returning
+ * silently is deliberate — the demo must not surface a read-only error for
+ * something the visitor didn't ask for.
  */
 export async function recordApplicationView(params: {
   organizationId: string
   applicationId: string
   userId: string
 }): Promise<void> {
+  // A failed demo lookup must not disable receipts for real orgs, so an error
+  // here falls through to recording as normal.
+  let isDemo = false
+  try {
+    isDemo = await isDemoOrgId(params.organizationId)
+  }
+  catch {
+    isDemo = false
+  }
+  if (isDemo) return
+
   try {
     await db
       .insert(applicationView)

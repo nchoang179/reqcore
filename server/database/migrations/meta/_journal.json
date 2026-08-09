@@ -463,6 +463,13 @@
       "when": 1786263088932,
       "tag": "0065_application_view",
       "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1786263088933,
+      "tag": "0066_demo_application_views",
+      "breakpoints": true
     }
   ]
 }

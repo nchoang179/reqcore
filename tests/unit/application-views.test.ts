@@ -90,6 +90,57 @@ describe('application read receipts', () => {
     expect(db.select).not.toHaveBeenCalled()
   })
 
+  // The demo is a single shared account and is advertised as read-only, but the
+  // receipt is written from a GET, which demo-guard never inspects.
+  describe('demo organization', () => {
+    it('records nothing, and raises no error the visitor would see', async () => {
+      const insert = vi.fn()
+      vi.stubGlobal('env', { DEMO_ORG_SLUG: 'reqcore-demo', RAILWAY_ENVIRONMENT_NAME: 'production' })
+      vi.stubGlobal('db', {
+        insert,
+        select: vi.fn(() => ({
+          from: vi.fn(() => ({
+            where: vi.fn(() => ({
+              limit: vi.fn(async () => [{ id: 'demo-org' }]),
+            })),
+          })),
+        })),
+      })
+
+      await expect(recordApplicationView({
+        organizationId: 'demo-org',
+        applicationId: 'app-1',
+        userId: 'demo-user',
+      })).resolves.toBeUndefined()
+
+      expect(insert).not.toHaveBeenCalled()
+    })
+
+    it('still records for a non-demo org', async () => {
+      const onConflictDoUpdate = vi.fn(async () => undefined)
+      const values = vi.fn(() => ({ onConflictDoUpdate }))
+      vi.stubGlobal('env', { DEMO_ORG_SLUG: 'reqcore-demo', RAILWAY_ENVIRONMENT_NAME: 'production' })
+      vi.stubGlobal('db', {
+        insert: vi.fn(() => ({ values })),
+        select: vi.fn(() => ({
+          from: vi.fn(() => ({
+            where: vi.fn(() => ({
+              limit: vi.fn(async () => [{ id: 'demo-org' }]),
+            })),
+          })),
+        })),
+      })
+
+      await recordApplicationView({
+        organizationId: 'real-org',
+        applicationId: 'app-1',
+        userId: 'user-1',
+      })
+
+      expect(values).toHaveBeenCalled()
+    })
+  })
+
   it('returns unviewed counts per job, omitting jobs with none', async () => {
     vi.stubGlobal('db', stubQuery([{ jobId: 'job-1', count: 224 }]))
 
