@@ -267,7 +267,15 @@ export function isStaleInheritedPreviewUrl(
   railwayDomain: string | undefined,
 ): boolean {
   if (!railwayDomain) return false;
-  if (!isRailwayPreviewEnvironment(env.RAILWAY_ENVIRONMENT_NAME)) return false;
+
+  // RAILWAY_GIT_PR_NUMBER is injected only in PR environments, so it's a far
+  // more reliable signal than the environment name — Railway names PR
+  // environments after the branch in some project configurations, and a branch
+  // like "fix/reply-address" would not match any name heuristic.
+  const isPreview =
+    !!env.RAILWAY_GIT_PR_NUMBER ||
+    isRailwayPreviewEnvironment(env.RAILWAY_ENVIRONMENT_NAME);
+  if (!isPreview) return false;
 
   const domain = railwayDomain.replace(/^https?:\/\//, "").toLowerCase();
 
