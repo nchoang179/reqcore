@@ -19,6 +19,7 @@ import { restoreCandidateForEngagement } from '~~/server/utils/candidate-retenti
 import {
   findReplyToken,
   inboundTextContent,
+  isKnownConversationSender,
   normalizeEmailAddress,
   parseReferences,
 } from '../../utils/candidate-messaging'
@@ -180,7 +181,17 @@ async function processInboundMessage(
   }
 
   const fromEmail = normalizeEmailAddress(event.data.from)
-  if (fromEmail !== normalizeEmailAddress(conversation.application.candidate.email)) {
+  const priorAddresses = await db
+    .selectDistinct({
+      address: sql<string>`case when ${candidateMessage.direction} = 'outbound'
+        then ${candidateMessage.toEmail} else ${candidateMessage.fromEmail} end`,
+    })
+    .from(candidateMessage)
+    .where(eq(candidateMessage.conversationId, conversation.id))
+  if (!isKnownConversationSender(fromEmail, [
+    conversation.application.candidate.email,
+    ...priorAddresses.map(row => row.address),
+  ])) {
     logWarn('candidate_message.inbound_sender_mismatch', {
       organization_id: conversation.organizationId,
       conversation_id: conversation.id,

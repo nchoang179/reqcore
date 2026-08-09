@@ -2773,7 +2773,17 @@ interface ApplicationAssignment {
   notes?: string;
 }
 
-const DEMO_APPLICATIONS_PER_STATUS = 3;
+/**
+ * Seed every application fixture by default so the demo pipeline shows real
+ * volume. Set DEMO_APPLICATIONS_PER_STATUS to a positive number for a slim
+ * seed that keeps only the highest-scored records per job/status.
+ */
+const DEMO_APPLICATIONS_PER_STATUS = (() => {
+  const configured = Number(process.env.DEMO_APPLICATIONS_PER_STATUS);
+  return Number.isFinite(configured) && configured > 0
+    ? configured
+    : Number.POSITIVE_INFINITY;
+})();
 
 // Job 0: Senior Full-Stack Engineer — high volume, full funnel
 const JOB_0_APPS: ApplicationAssignment[] = [
@@ -4039,8 +4049,9 @@ const ALL_JOB_APPLICATIONS = [
 ];
 
 /**
- * The pipeline defaults to "Highest score", so seed only the records a demo
- * visitor can meaningfully inspect at the top of every job/status combination.
+ * The pipeline defaults to "Highest score", so a capped seed keeps the records
+ * a demo visitor can meaningfully inspect at the top of every job/status
+ * combination. Uncapped by default — see DEMO_APPLICATIONS_PER_STATUS.
  */
 const JOB_APPLICATIONS = ALL_JOB_APPLICATIONS.map((applications) =>
   selectTopApplicationsPerStatus(

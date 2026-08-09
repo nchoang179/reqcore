@@ -6,6 +6,7 @@ import {
   findReplyToken,
   inboundTextContent,
   isDedicatedReplyDomain,
+  isKnownConversationSender,
   normalizeEmailAddress,
   parseReferences,
   replySubject,
@@ -71,6 +72,29 @@ describe('candidate message reply routing', () => {
   it('rejects malformed and short tokens', () => {
     expect(findReplyToken(['reply-not-a-token@reply.reqcore.com'], 'reply.reqcore.com')).toBeNull()
     expect(findReplyToken(['reply-0123@reply.reqcore.com'], 'reply.reqcore.com')).toBeNull()
+  })
+})
+
+describe('inbound sender recognition', () => {
+  const current = 'alice@new.test'
+
+  it('accepts the candidate current address regardless of casing or display name', () => {
+    expect(isKnownConversationSender('Alice <ALICE@New.test>', [current])).toBe(true)
+  })
+
+  it('accepts a reply from the address an earlier message was sent to', () => {
+    // The candidate record was edited to `current` after the invitation went
+    // out, so the candidate replies from the address that received it.
+    expect(isKnownConversationSender('alice@old.test', [current, 'alice@old.test'])).toBe(true)
+  })
+
+  it('rejects an address the conversation has never corresponded with', () => {
+    expect(isKnownConversationSender('stranger@example.test', [current, 'alice@old.test'])).toBe(false)
+  })
+
+  it('ignores missing history entries instead of matching on them', () => {
+    expect(isKnownConversationSender('alice@new.test', [null, undefined, current])).toBe(true)
+    expect(isKnownConversationSender('', [null, current])).toBe(false)
   })
 })
 

@@ -6,16 +6,25 @@
  * - `server/utils/trackEvent.ts` to tag PostHog events with `is_demo: true`
  *   so the demo session can be filtered out of funnels and dashboards.
  *
- * Demo-org IDs are cached after the first DB lookup. We never cache a
- * negative result so that orgs created after server boot are picked up
- * on the next request.
+ * Demo-org IDs are cached after the first DB lookup, but only for
+ * DEMO_ORG_ID_TTL_MS. Re-seeding deletes the demo org and recreates it under
+ * the same slug with a fresh id, so a permanent cache would leave a long-lived
+ * server pinned to a deleted org — the demo account would then see an empty
+ * organization list and be pushed into onboarding. We never cache a negative
+ * result either, so orgs created after server boot are picked up on the next
+ * request.
  */
 import { eq } from 'drizzle-orm'
 import * as schema from '../database/schema'
 import { isRailwayPreviewEnvironment } from './env'
 
-const demoOrgIdBySlug = new Map<string, string>()
-const demoOrgIdSet = new Set<string>()
+interface CachedDemoOrgId {
+  id: string
+  expiresAt: number
+}
+
+const DEMO_ORG_ID_TTL_MS = 60_000
+const demoOrgIdBySlug = new Map<string, CachedDemoOrgId>()
 const DEFAULT_DEMO_ACCOUNT_EMAIL = 'demo@reqcore.com'
 const DEFAULT_PREVIEW_DEMO_ORG_SLUG = 'reqcore-demo'
 
@@ -90,18 +99,20 @@ export async function assertDemoAccountCanUseOrg(
 /**
  * Resolve the configured demo slugs to organisation IDs.
  *
- * Falls back to a synchronous cache lookup when possible to avoid an
- * extra DB hit on every authenticated request. The first request after
- * boot still pays the lookup cost.
+ * Falls back to a cached id when possible to avoid an extra DB hit on every
+ * authenticated request. Entries expire after DEMO_ORG_ID_TTL_MS so a reseed
+ * (which recreates the org with a new id under the same slug) heals itself
+ * without a redeploy.
  */
 export async function getDemoOrgIds(slugs?: string[]): Promise<Set<string>> {
   const slugList = slugs ?? getConfiguredDemoSlugs().slugs
   const ids = new Set<string>()
+  const now = Date.now()
 
   for (const slug of slugList) {
     const cached = demoOrgIdBySlug.get(slug)
-    if (cached) {
-      ids.add(cached)
+    if (cached && cached.expiresAt > now) {
+      ids.add(cached.id)
       continue
     }
 
@@ -111,14 +122,23 @@ export async function getDemoOrgIds(slugs?: string[]): Promise<Set<string>> {
       .where(eq(schema.organization.slug, slug))
       .limit(1)
 
-    if (!org?.id) continue
+    if (!org?.id) {
+      // The org is gone (mid-reseed). Drop the stale entry rather than
+      // serving a deleted id until the TTL runs out.
+      demoOrgIdBySlug.delete(slug)
+      continue
+    }
 
-    demoOrgIdBySlug.set(slug, org.id)
-    demoOrgIdSet.add(org.id)
+    demoOrgIdBySlug.set(slug, { id: org.id, expiresAt: now + DEMO_ORG_ID_TTL_MS })
     ids.add(org.id)
   }
 
   return ids
+}
+
+/** Test seam: drops every cached slug → id mapping. */
+export function clearDemoOrgIdCache(): void {
+  demoOrgIdBySlug.clear()
 }
 
 /**
