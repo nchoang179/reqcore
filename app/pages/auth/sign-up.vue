@@ -28,6 +28,7 @@ const oidcProviderName = computed(
     () => authProviders.value?.oidcProviderName || "SSO",
 );
 const socialLoading = ref<string | null>(null);
+const nameInput = ref<HTMLInputElement | null>(null);
 
 const socialProviders = computed(() => {
     const providers: { id: string; name: string }[] = [];
@@ -37,7 +38,11 @@ const socialProviders = computed(() => {
     return providers;
 });
 
-onMounted(() => track("signup_page_viewed"));
+onMounted(() => {
+    track("signup_page_viewed");
+    // Drop the cursor straight into the first field so signup starts typing-ready.
+    nameInput.value?.focus();
+});
 
 // If the user arrived from an invitation link, we'll redirect back after sign-up
 const pendingInvitation = computed(
@@ -314,6 +319,7 @@ async function handleSocialSignUp(providerId: string) {
         >
             <span>Name</span>
             <input
+                ref="nameInput"
                 v-model="name"
                 type="text"
                 autocomplete="name"

@@ -295,6 +295,26 @@ async function handleSubmitJoinRequest() {
     isSubmittingRequest.value = false
   }
 }
+
+// ─────────────────────────────────────────────
+// Autofocus the org name field
+// ─────────────────────────────────────────────
+// The create form sits behind a v-if chain that only resolves once orgs have
+// loaded, so the `autofocus` attribute is unreliable here — we focus manually
+// the moment the form actually enters the DOM.
+const orgNameInput = ref<HTMLInputElement | null>(null)
+
+const isCreateFormVisible = computed(() =>
+  !isLoading.value
+  && !isOrgsLoading.value
+  && !inviteCodeSuccess.value
+  && viewMode.value !== 'join'
+  && !(orgs.value.length > 0 && viewMode.value === 'picker'),
+)
+
+watch(isCreateFormVisible, (visible) => {
+  if (visible) nextTick(() => orgNameInput.value?.focus())
+}, { immediate: true })
 </script>
 
 <template>
@@ -517,6 +537,7 @@ async function handleSubmitJoinRequest() {
     <label class="flex flex-col gap-1 text-sm font-medium text-surface-700 dark:text-surface-300">
       <span>Organization name</span>
       <input
+        ref="orgNameInput"
         v-model="orgName"
         type="text"
         placeholder="Acme Corp"

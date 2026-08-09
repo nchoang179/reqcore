@@ -124,6 +124,51 @@ function selectOption(value: string) {
   setTimeout(advance, 180)
 }
 
+// ─────────────────────────────────────────────
+// Keyboard navigation
+// ─────────────────────────────────────────────
+// Roving focus over the option buttons: every question opens with the top
+// option highlighted and focused, so Enter alone answers it and ↑/↓ move the
+// selection. Plain DOM refs (not a ref()) — we only read them to call focus().
+const optionButtons: (HTMLButtonElement | null)[] = []
+const highlightedIndex = ref(0)
+
+function focusOption(index: number) {
+  const count = question.value.options.length
+  if (!count) return
+  highlightedIndex.value = ((index % count) + count) % count
+  optionButtons[highlightedIndex.value]?.focus()
+}
+
+// Moving between questions resets the highlight. Coming back to an answered
+// question highlights the answer you already gave rather than the top option.
+watch(question, (q) => {
+  optionButtons.length = 0
+  const answered = q.options.findIndex(o => o.value === answers[q.id])
+  highlightedIndex.value = answered === -1 ? 0 : answered
+})
+
+// The question is inside a <Transition mode="out-in">, so the new buttons only
+// exist once the enter transition has run — focus from there, and from
+// onMounted for the first question (which doesn't animate in).
+onMounted(() => focusOption(highlightedIndex.value))
+
+function onQuestionEntered() {
+  focusOption(highlightedIndex.value)
+}
+
+// Listening on the document (not just the card) keeps ↑/↓ working after a
+// click lands on non-focusable page chrome.
+function onArrowKeys(event: KeyboardEvent) {
+  if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
+  if (isAdvancing.value || isFinishing.value) return
+  event.preventDefault()
+  focusOption(highlightedIndex.value + (event.key === 'ArrowDown' ? 1 : -1))
+}
+
+onMounted(() => document.addEventListener('keydown', onArrowKeys))
+onBeforeUnmount(() => document.removeEventListener('keydown', onArrowKeys))
+
 function skip() {
   if (isAdvancing.value || isFinishing.value) return
   track('onboarding_survey_question_skipped', {
@@ -211,7 +256,7 @@ async function finish() {
     </div>
 
     <!-- Question -->
-    <Transition name="survey-fade" mode="out-in">
+    <Transition name="survey-fade" mode="out-in" @after-enter="onQuestionEntered">
       <div :key="question.id" class="flex flex-col gap-5">
         <div>
           <h3 class="text-lg font-semibold text-surface-900 dark:text-surface-100">
@@ -226,13 +271,21 @@ async function finish() {
           <button
             v-for="(option, i) in question.options"
             :key="option.value"
+            :ref="el => { optionButtons[i] = el as HTMLButtonElement | null }"
             type="button"
             :disabled="isFinishing"
-            class="group flex items-center gap-3 rounded-xl border px-4 py-3.5 text-left text-sm font-medium transition-all cursor-pointer disabled:cursor-not-allowed"
-            :class="answers[question.id] === option.value
-              ? 'border-brand-500 bg-brand-50 text-brand-900 shadow-sm ring-1 ring-brand-500/20 dark:border-brand-500 dark:bg-brand-950/40 dark:text-brand-100'
-              : 'border-surface-200 bg-white text-surface-800 hover:border-brand-400 hover:shadow-sm dark:border-surface-800 dark:bg-surface-900 dark:text-surface-200 dark:hover:border-brand-700'"
+            :tabindex="highlightedIndex === i ? 0 : -1"
+            class="group flex items-center gap-3 rounded-xl border px-4 py-3.5 text-left text-sm font-medium transition-all cursor-pointer outline-none disabled:cursor-not-allowed"
+            :class="[
+              answers[question.id] === option.value
+                ? 'border-brand-500 bg-brand-50 text-brand-900 shadow-sm ring-1 ring-brand-500/20 dark:border-brand-500 dark:bg-brand-950/40 dark:text-brand-100'
+                : 'border-surface-200 bg-white text-surface-800 hover:border-brand-400 hover:shadow-sm dark:border-surface-800 dark:bg-surface-900 dark:text-surface-200 dark:hover:border-brand-700',
+              highlightedIndex === i && answers[question.id] !== option.value
+                ? 'border-brand-400 ring-2 ring-brand-500/25 dark:border-brand-600'
+                : '',
+            ]"
             @click="selectOption(option.value)"
+            @focus="highlightedIndex = i"
           >
             <span
               class="flex size-7 shrink-0 items-center justify-center rounded-md border text-xs font-semibold transition-colors"
