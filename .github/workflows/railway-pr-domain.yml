@@ -1,0 +1,84 @@
+name: Railway PR Domain
+
+# Railway does not reliably generate a public domain for PR environments, which
+# leaves the preview deployment unreachable until someone clicks "Generate
+# Domain" by hand. This ensures one exists.
+#
+# The URL itself needs no manual step: a PR environment inherits
+# BETTER_AUTH_URL from the base environment, and server/utils/auth.ts detects
+# that stale inherited value and uses RAILWAY_PUBLIC_DOMAIN instead.
+#
+# Required repository secret:
+#   RAILWAY_API_TOKEN   - account or team token (Railway → Account Settings → Tokens)
+# Required repository variables:
+#   RAILWAY_PROJECT_ID  - Railway project id
+#   RAILWAY_SERVICE_NAME - name of the app service (e.g. "reqcore")
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: PR number whose environment needs a domain
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: railway-pr-domain-${{ github.event.pull_request.number || inputs.pr_number }}
+  cancel-in-progress: false
+
+jobs:
+  ensure-domain:
+    name: Ensure PR environment has a public domain
+    runs-on: ubuntu-latest
+    # Forked PRs cannot read secrets, and Railway does not build them anyway.
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+
+    env:
+      RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+      PROJECT_ID: ${{ vars.RAILWAY_PROJECT_ID }}
+      SERVICE_NAME: ${{ vars.RAILWAY_SERVICE_NAME }}
+      PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+
+    steps:
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Wait for the PR environment to exist
+        id: env
+        run: |
+          set -euo pipefail
+          # Railway creates the PR environment asynchronously after the PR opens.
+          for attempt in $(seq 1 20); do
+            if railway environment "pr-$PR_NUMBER" --project "$PROJECT_ID" >/dev/null 2>&1; then
+              echo "found=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "pr-$PR_NUMBER not ready yet (attempt $attempt/20)"
+            sleep 15
+          done
+          echo "found=false" >> "$GITHUB_OUTPUT"
+          echo "::warning::Railway environment pr-$PR_NUMBER never appeared; skipping."
+
+      - name: Generate a domain if the service has none
+        if: steps.env.outputs.found == 'true'
+        run: |
+          set -euo pipefail
+          railway link \
+            --project "$PROJECT_ID" \
+            --environment "pr-$PR_NUMBER" \
+            --service "$SERVICE_NAME"
+
+          # `railway domain` is idempotent: it prints the existing domain when
+          # one is already attached rather than creating a second.
+          railway domain | tee domain.txt
+
+          echo "PREVIEW_URL=$(grep -oE '[a-z0-9.-]+\.up\.railway\.app' domain.txt | head -1)" >> "$GITHUB_ENV"
+
+      - name: Summary
+        if: steps.env.outputs.found == 'true'
+        run: |
+          echo "Preview: https://${PREVIEW_URL:-unknown}" >> "$GITHUB_STEP_SUMMARY"

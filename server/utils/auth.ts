@@ -12,7 +12,7 @@ import { sendOrgInvitationEmail, sendPasswordResetEmail, sendVerificationEmail }
 import { deferredEmailVerification } from "./email-verification";
 import { isDisposableEmailDomain } from "./disposable-email-domains";
 import { OUTBOUND_LIMITS } from "~~/shared/abuse-limits";
-import { getMissingStripeBillingVars, isStripeBillingConfigured } from "./env";
+import { getMissingStripeBillingVars, isStripeBillingConfigured, isRailwayPreviewEnvironment } from "./env";
 import { buildStripePlans } from "./billing/stripe-plans";
 import { isDemoOrgId, isDemoAccountEmail } from "./demoOrg";
 import * as schema from "../database/schema";
@@ -257,12 +257,46 @@ function resolveTrustedOrigins(baseUrl: string): (request?: Request) => Promise<
   };
 }
 
+/**
+ * True when we're in a Railway PR environment and the configured
+ * BETTER_AUTH_URL points somewhere other than this deployment's own domain —
+ * i.e. it was cloned from the base environment and is stale.
+ */
+export function isStaleInheritedPreviewUrl(
+  explicitUrl: string,
+  railwayDomain: string | undefined,
+): boolean {
+  if (!railwayDomain) return false;
+  if (!isRailwayPreviewEnvironment(env.RAILWAY_ENVIRONMENT_NAME)) return false;
+
+  const domain = railwayDomain.replace(/^https?:\/\//, "").toLowerCase();
+
+  let explicitHost: string;
+  try {
+    explicitHost = new URL(explicitUrl).host.toLowerCase();
+  } catch {
+    // Unparseable value can't be trusted as this deployment's URL.
+    return true;
+  }
+
+  if (explicitHost === domain) return false;
+
+  console.warn(
+    `[Reqcore] Ignoring inherited BETTER_AUTH_URL (${explicitHost}) in preview ` +
+      `environment "${env.RAILWAY_ENVIRONMENT_NAME}"; using ${domain} instead.`,
+  );
+  return true;
+}
+
 function resolveBetterAuthUrl(): string {
   const explicitUrl = env.BETTER_AUTH_URL?.trim();
   const railwayDomain = env.RAILWAY_PUBLIC_DOMAIN?.trim();
 
-  // Explicit URL always wins (custom domain, local dev, etc.)
-  if (explicitUrl) {
+  // Explicit URL always wins (custom domain, local dev, etc.) — except in a
+  // Railway PR environment, which inherits the base environment's variables.
+  // There the inherited BETTER_AUTH_URL points at production, so the PR
+  // deployment's own domain is the only correct answer.
+  if (explicitUrl && !isStaleInheritedPreviewUrl(explicitUrl, railwayDomain)) {
     return explicitUrl;
   }
 
