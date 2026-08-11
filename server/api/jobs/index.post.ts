@@ -170,6 +170,24 @@ export default defineEventHandler(async (event) => {
     auto_score: created.autoScoreOnApply,
   })
 
+  // Ends the "signed up, never opened a role" wait in Resend. `isTest` rides
+  // along rather than gating the emit: a test role is a real step forward and
+  // should stop the generic nudge, but it is not the same as opening a live
+  // role, and which of those two the automation treats as activation is a copy
+  // decision — so it belongs in the automation's condition, not in this file.
+  emitLifecycleEventInBackground({
+    event: LIFECYCLE_EVENTS.jobPosted,
+    email: session.user.email,
+    organizationId: orgId,
+    payload: {
+      jobId: created.id,
+      jobTitle: created.title,
+      isTest: body.isTest,
+      status: created.status,
+      firstName: session.user.name?.split(' ')[0] ?? null,
+    },
+  })
+
   logApiRequest(event, session, 'job.created', {
     job_id: created.id,
     job_type: created.type,

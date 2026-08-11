@@ -15,6 +15,7 @@ import { OUTBOUND_LIMITS } from "~~/shared/abuse-limits";
 import { getMissingStripeBillingVars, isStripeBillingConfigured, isRailwayPreviewEnvironment } from "./env";
 import { buildStripePlans } from "./billing/stripe-plans";
 import { isDemoOrgId, isDemoAccountEmail } from "./demoOrg";
+import { LIFECYCLE_EVENTS, emitLifecycleEventInBackground } from "./lifecycle/events";
 import * as schema from "../database/schema";
 
 /**
@@ -484,6 +485,43 @@ function getAuth(): Auth {
           async sendInvitationEmail(data) {
             const inviteLink = `${baseURL}/auth/accept-invitation/${data.id}`;
             await sendOrgInvitationEmail(data, inviteLink);
+          },
+
+          // ── Activation Funnel ───────────────────────────────────
+          // Starts the "signed up, never opened a role" clock in Resend
+          // Automations. This is the entry point of the funnel: the org row is
+          // the first durable thing a signup produces, and every later step
+          // (post a role, receive an application, run an analysis) hangs off it.
+          //
+          // Fires for every organization a user creates, not just their first.
+          // A second org is a second workspace that can stall on its own, and
+          // the automation keys on the org id in the payload. `isFirstOrg`
+          // separates the two cases for the copy: someone opening their third
+          // workspace already knows what Reqcore is, and greeting them as a new
+          // signup is the kind of detail that makes automated mail obvious.
+          organizationHooks: {
+            afterCreateOrganization: async ({ organization: org, user }) => {
+              // The new org's own member row already exists here, so the
+              // first-ever workspace counts 1. Counting memberships rather than
+              // orgs created means someone invited into a colleague's workspace
+              // before starting their own is not treated as brand new either.
+              const [membership] = await db
+                .select({ count: sql<number>`count(*)::int` })
+                .from(schema.member)
+                .where(eq(schema.member.userId, user.id));
+
+              emitLifecycleEventInBackground({
+                event: LIFECYCLE_EVENTS.orgCreated,
+                email: user.email,
+                organizationId: org.id,
+                payload: {
+                  organizationName: org.name,
+                  organizationSlug: org.slug,
+                  firstName: user.name?.split(" ")[0] ?? null,
+                  isFirstOrg: (membership?.count ?? 1) <= 1,
+                },
+              });
+            },
           },
 
           // ── Abuse Hardening ─────────────────────────────────────

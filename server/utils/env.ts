@@ -194,6 +194,16 @@ export const envSchema = z
       val => val === undefined || val === '' ? true : val === true || val === 'true',
       z.boolean().default(true),
     ),
+    /**
+     * Master switch for lifecycle (activation) emails via Resend Automations.
+     * Fail-CLOSED, unlike NOTIFICATIONS_ENABLED: emitting an event sends a user's
+     * email address to the Resend account named by RESEND_API_KEY, which is only
+     * ever the right default on the hosted instance. Self-hosters keep it unset.
+     */
+    LIFECYCLE_EMAILS_ENABLED: z.preprocess(
+      val => val === true || val === 'true',
+      z.boolean().default(false),
+    ),
     // ── Platform AI gateway (optional) ──────────────────────────
     // When OPENROUTER_API_KEY is set, orgs without their own AI config fall back
     // to our platform key, routed through OpenRouter for unified billing and
@@ -379,7 +389,7 @@ export const env = new Proxy({} as z.infer<typeof envSchema>, {
             `Ensure these variables are set in your Railway service (Settings → Variables).\n` +
             `Required: DATABASE_URL, BETTER_AUTH_SECRET, S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, S3_BUCKET\n` +
             `Required when not on Railway: BETTER_AUTH_URL (or generate a Railway domain)\n` +
-            `Optional: BETTER_AUTH_TRUSTED_ORIGINS, S3_REGION (default: us-east-1), S3_FORCE_PATH_STYLE (default: true), TRUSTED_PROXY (default: cloudflare in production), TRUSTED_PROXY_IP, DEMO_ORG_SLUG, RESEND_API_KEY, RESEND_RECEIVING_API_KEY, RESEND_FROM_EMAIL, RESEND_CANDIDATE_FROM_EMAIL, RESEND_REPLY_DOMAIN, RESEND_WEBHOOK_SECRET, SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM, SMTP_SECURE, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET, OIDC_DISCOVERY_URL, OIDC_PROVIDER_NAME, AUTH_GOOGLE_CLIENT_ID, AUTH_GOOGLE_CLIENT_SECRET, AUTH_GITHUB_CLIENT_ID, AUTH_GITHUB_CLIENT_SECRET, AUTH_MICROSOFT_CLIENT_ID, AUTH_MICROSOFT_CLIENT_SECRET, AUTH_MICROSOFT_TENANT_ID\n`,
+            `Optional: BETTER_AUTH_TRUSTED_ORIGINS, S3_REGION (default: us-east-1), S3_FORCE_PATH_STYLE (default: true), TRUSTED_PROXY (default: cloudflare in production), TRUSTED_PROXY_IP, DEMO_ORG_SLUG, RESEND_API_KEY, RESEND_RECEIVING_API_KEY, RESEND_FROM_EMAIL, RESEND_CANDIDATE_FROM_EMAIL, RESEND_REPLY_DOMAIN, RESEND_WEBHOOK_SECRET, LIFECYCLE_EMAILS_ENABLED, SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM, SMTP_SECURE, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET, OIDC_DISCOVERY_URL, OIDC_PROVIDER_NAME, AUTH_GOOGLE_CLIENT_ID, AUTH_GOOGLE_CLIENT_SECRET, AUTH_GITHUB_CLIENT_ID, AUTH_GITHUB_CLIENT_SECRET, AUTH_MICROSOFT_CLIENT_ID, AUTH_MICROSOFT_CLIENT_SECRET, AUTH_MICROSOFT_TENANT_ID\n`,
         );
         throw result.error;
       }
