@@ -18,6 +18,7 @@ const error = ref("");
 const isLoading = ref(false);
 const socialLoading = ref<string | null>(null);
 const ssoRedirecting = ref(false);
+const emailInput = ref<HTMLInputElement | null>(null);
 const route = useRoute();
 const config = useRuntimeConfig();
 const localePath = useLocalePath();
@@ -40,7 +41,12 @@ const socialProviders = computed(() => {
     return providers;
 });
 
-onMounted(() => track("signin_page_viewed"));
+onMounted(() => {
+    track("signin_page_viewed");
+    // Drop the cursor straight into the first field, unless the demo links
+    // already filled the credentials in.
+    if (!email.value) emailInput.value?.focus();
+});
 
 if (
     route.query.live === "1" ||
@@ -397,6 +403,7 @@ async function handleSocialSignIn(providerId: string) {
         >
             <span>Email</span>
             <input
+                ref="emailInput"
                 v-model="email"
                 type="email"
                 autocomplete="email"

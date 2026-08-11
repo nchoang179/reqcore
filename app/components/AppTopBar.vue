@@ -148,6 +148,21 @@ function isActiveRoute(to: string, exact: boolean) {
   return route.path === localizedTo || route.path.startsWith(`${localizedTo}/`)
 }
 
+// A plain mouse wheel only scrolls vertically, so on a narrow desktop window the
+// overflowing nav links would be unreachable without a trackpad. Translate the
+// vertical delta into horizontal scrolling while there's somewhere left to go.
+const navScroller = useTemplateRef<HTMLElement>('navScrollerRoot')
+function onNavWheel(e: WheelEvent) {
+  const el = navScroller.value
+  if (!el || e.deltaY === 0 || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return
+  const max = el.scrollWidth - el.clientWidth
+  if (max <= 0) return
+  const next = Math.min(Math.max(el.scrollLeft + e.deltaY, 0), max)
+  if (next === el.scrollLeft) return
+  e.preventDefault()
+  el.scrollLeft = next
+}
+
 const primaryNavLabels = ['Dashboard', 'Jobs', 'Candidates', 'Applications', 'Inbox', 'Interviews', 'Assistant', 'Settings']
 const primaryNavItems = computed(() => navItems.filter(i => primaryNavLabels.includes(i.label)))
 const moreNavItems = computed(() => navItems.filter(i => !primaryNavLabels.includes(i.label)))
@@ -199,35 +214,43 @@ onUnmounted(() => {
   <div v-if="!activeJobId" class="relative z-20 border-b border-surface-200/80 dark:border-surface-800/80 bg-white/80 dark:bg-surface-900/80 backdrop-blur-xl">
       <div class="flex h-14 items-center justify-between px-4 lg:px-6">
         <!-- Left: Logo + Nav -->
-        <div class="flex items-center gap-1 lg:gap-2">
+        <div class="flex min-w-0 flex-1 items-center gap-1 lg:gap-2">
           <!-- Logo — links to marketing site (reqcore.com), not app root -->
           <a
             :href="useRuntimeConfig().public.marketingUrl"
-            class="flex items-center gap-2.5 px-2 py-1.5 rounded-lg no-underline hover:bg-surface-100/60 dark:hover:bg-surface-800/60 transition-colors mr-1 lg:mr-4"
+            class="flex shrink-0 items-center gap-2.5 px-2 py-1.5 rounded-lg no-underline hover:bg-surface-100/60 dark:hover:bg-surface-800/60 transition-colors mr-1 lg:mr-4"
           >
             <img src="/eagle-mascot-logo.png" alt="Reqcore mascot" class="size-7 shrink-0 object-contain" />
             <span class="text-[15px] font-bold text-surface-900 dark:text-surface-100 hidden sm:block tracking-tight">Reqcore</span>
           </a>
 
-          <!-- Desktop nav links -->
-          <nav class="hidden md:flex items-center gap-0.5">
-            <NuxtLink
-              v-for="item in primaryNavItems"
-              :key="item.to"
-              :to="$localePath(item.to)"
-              class="relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[13px] font-medium transition-all duration-200 no-underline"
-              :class="isActiveRoute(item.to, item.exact)
-                ? 'text-brand-700 dark:text-brand-300 bg-brand-50/80 dark:bg-brand-950/40'
-                : 'text-surface-600 dark:text-surface-400 hover:text-surface-900 dark:hover:text-surface-100 hover:bg-surface-100/80 dark:hover:bg-surface-800/60'"
+          <!-- Desktop nav links — scroll horizontally once they outgrow the bar.
+               The More dropdown sits outside the scroll box so its panel, which
+               hangs below the 56px row, isn't clipped by the overflow. -->
+          <nav class="hidden md:flex min-w-0 flex-1 items-center gap-0.5">
+            <div
+              ref="navScrollerRoot"
+              class="flex min-w-0 items-center gap-0.5 overflow-x-auto scrollbar-none"
+              @wheel="onNavWheel"
             >
-              <component :is="item.icon" class="size-4" />
-              {{ item.label }}
-            </NuxtLink>
+              <NuxtLink
+                v-for="item in primaryNavItems"
+                :key="item.to"
+                :to="$localePath(item.to)"
+                class="relative flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-1.5 rounded-lg text-[13px] font-medium transition-all duration-200 no-underline"
+                :class="isActiveRoute(item.to, item.exact)
+                  ? 'text-brand-700 dark:text-brand-300 bg-brand-50/80 dark:bg-brand-950/40'
+                  : 'text-surface-600 dark:text-surface-400 hover:text-surface-900 dark:hover:text-surface-100 hover:bg-surface-100/80 dark:hover:bg-surface-800/60'"
+              >
+                <component :is="item.icon" class="size-4" />
+                {{ item.label }}
+              </NuxtLink>
+            </div>
 
             <!-- More nav dropdown -->
             <div
               v-if="moreNavItems.length"
-              class="relative"
+              class="relative shrink-0"
               @mouseenter="showMoreNav = true"
               @mouseleave="showMoreNav = false"
             >
@@ -281,7 +304,7 @@ onUnmounted(() => {
         </div>
 
         <!-- Right: Actions -->
-        <div class="flex items-center gap-1 lg:gap-1.5">
+        <div class="flex shrink-0 items-center gap-1 lg:gap-1.5 pl-2">
           <!-- Get Started CTA (demo mode only) -->
           <div
             v-if="isDemo"

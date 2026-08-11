@@ -28,6 +28,8 @@ const preferredHorizontalAlign = computed(() =>
 )
 const renderedHorizontalAlign = ref<'left' | 'right'>(preferredHorizontalAlign.value)
 const menuOffsetX = ref(0)
+const renderedDropUp = ref(props.dropUp)
+const menuMaxHeight = ref<number | null>(null)
 
 const route = useRoute()
 const requestURL = useRequestURL()
@@ -81,6 +83,33 @@ function updateMenuPlacement() {
   else {
     menuOffsetX.value = 0
   }
+
+  // Vertical placement: a drop-up trigger sitting near the top of the window
+  // (e.g. inside the top bar user menu) would otherwise open off-screen, and a
+  // drop-down trigger near the bottom has the mirror problem.
+  const menuGap = 4 // matches the mt-1 / mb-1 offset below
+  const naturalHeight = Math.max(menuRef.value.scrollHeight, menuRect.height)
+  const spaceAbove = triggerRect.top - viewportPadding - menuGap
+  const spaceBelow = window.innerHeight - triggerRect.bottom - viewportPadding - menuGap
+
+  if (props.dropUp && naturalHeight > spaceAbove && naturalHeight <= spaceBelow) {
+    renderedDropUp.value = false
+  }
+  else if (!props.dropUp && naturalHeight > spaceBelow && naturalHeight <= spaceAbove) {
+    renderedDropUp.value = true
+  }
+  else {
+    // Neither side fits outright: keep the preferred side, but favour the
+    // roomier one so the clamped menu shows as many options as possible.
+    renderedDropUp.value = naturalHeight > spaceAbove && naturalHeight > spaceBelow
+      ? spaceAbove > spaceBelow
+      : props.dropUp
+  }
+
+  const availableHeight = renderedDropUp.value ? spaceAbove : spaceBelow
+  menuMaxHeight.value = naturalHeight > availableHeight
+    ? Math.max(availableHeight, 120)
+    : null
 }
 
 watch(preferredHorizontalAlign, async (nextAlign) => {
@@ -90,14 +119,30 @@ watch(preferredHorizontalAlign, async (nextAlign) => {
   updateMenuPlacement()
 })
 
+watch(() => props.dropUp, async (nextDropUp) => {
+  renderedDropUp.value = nextDropUp
+  if (!isOpen.value) return
+  await nextTick()
+  updateMenuPlacement()
+})
+
 watch(isOpen, async (open) => {
   if (!open) {
     menuOffsetX.value = 0
+    menuMaxHeight.value = null
     return
   }
   renderedHorizontalAlign.value = preferredHorizontalAlign.value
+  renderedDropUp.value = props.dropUp
   await nextTick()
   updateMenuPlacement()
+})
+
+const menuStyle = computed(() => {
+  const style: Record<string, string> = {}
+  if (menuOffsetX.value) style.transform = `translateX(${menuOffsetX.value}px)`
+  if (menuMaxHeight.value !== null) style.maxHeight = `${menuMaxHeight.value}px`
+  return Object.keys(style).length ? style : undefined
 })
 
 function handleClickOutside(event: MouseEvent) {
@@ -311,12 +356,12 @@ async function handleLocaleChange(nextLocale: string) {
         ref="menuRef"
         role="listbox"
         :aria-label="t('common.selectLanguage')"
-        class="absolute z-50 w-48 max-w-[calc(100vw-1rem)] rounded-md border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 shadow-lg py-1 text-xs"
+        class="absolute z-50 w-48 max-w-[calc(100vw-1rem)] overflow-y-auto overscroll-contain rounded-md border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 shadow-lg py-1 text-xs"
         :class="[
-          props.dropUp ? 'bottom-full mb-1' : 'mt-1',
+          renderedDropUp ? 'bottom-full mb-1' : 'top-full mt-1',
           renderedHorizontalAlign === 'left' ? 'left-0' : 'right-0',
         ]"
-        :style="menuOffsetX ? { transform: `translateX(${menuOffsetX}px)` } : undefined"
+        :style="menuStyle"
       >
         <li
           v-for="option in localeOptions"
