@@ -33,6 +33,12 @@ export function useJobs(options?: {
     type?: 'full_time' | 'part_time' | 'contract' | 'internship'
     experienceLevel?: 'junior' | 'mid' | 'senior' | 'lead'
     remoteStatus?: 'remote' | 'hybrid' | 'onsite'
+    /** Pay range, as the boards index it. Omitted or null means "not stated". */
+    salaryMin?: number | null
+    salaryMax?: number | null
+    salaryCurrency?: string | null
+    salaryUnit?: 'YEAR' | 'MONTH' | 'HOUR' | null
+    salaryNegotiable?: boolean
     phoneRequirement?: 'hidden' | 'optional' | 'required'
     requireResume?: boolean
     requireCoverLetter?: boolean

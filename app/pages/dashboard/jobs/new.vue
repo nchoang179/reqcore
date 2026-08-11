@@ -22,6 +22,7 @@ import {
   Share2,
   Globe2,
   FlaskConical,
+  Banknote,
 } from 'lucide-vue-next'
 import { z } from 'zod'
 import type { LocationSelection } from '~/components/LocationCombobox.vue'
@@ -103,7 +104,41 @@ const form = ref({
   type: 'full_time' as 'full_time' | 'part_time' | 'contract' | 'internship',
   experienceLevel: 'mid' as 'junior' | 'mid' | 'senior' | 'lead',
   remoteStatus: undefined as 'remote' | 'hybrid' | 'onsite' | undefined,
+  // Compensation. Optional, but the single biggest lever on how a listing
+  // performs once it reaches the boards — Google Jobs surfaces a pay range and
+  // most aggregators sort or filter on one.
+  salaryMin: null as number | null,
+  salaryMax: null as number | null,
+  salaryCurrency: null as string | null,
+  salaryUnit: 'YEAR' as 'YEAR' | 'MONTH' | 'HOUR' | null,
+  salaryNegotiable: false,
 })
+
+/**
+ * A range and "negotiable" are two different answers to the same question, so
+ * turning negotiable on drops the range rather than leaving a hidden one behind
+ * to reappear if it is turned back off.
+ */
+watch(() => form.value.salaryNegotiable, (negotiable) => {
+  if (!negotiable) return
+  form.value.salaryMin = null
+  form.value.salaryMax = null
+})
+
+/**
+ * Compensation is folded away by default: most roles are filled in without it,
+ * and it sits between the title and the description, which are the two fields
+ * everyone is here to write.
+ *
+ * It opens itself whenever there is something to see or fix — a restored draft
+ * that states pay, and any salary problem, since a blocker hidden inside a
+ * closed panel is a disabled Next button with no visible cause.
+ */
+const showCompensation = ref(false)
+
+const hasSalaryDetails = computed(() =>
+  form.value.salaryNegotiable || form.value.salaryMin != null || form.value.salaryMax != null,
+)
 
 /** Adapter between the three flat form fields and the picker's single value. */
 const locationSelection = computed<LocationSelection | null>({
@@ -425,6 +460,25 @@ const isPopulatingSample = ref(false)
 const errors = ref<Record<string, string>>({})
 const linkCopied = ref(false)
 
+/**
+ * One end of a pay range.
+ *
+ * An emptied number input hands back `''`, and `z.coerce.number()` reads that as
+ * 0 — which would quietly advertise the role at zero. So blank in every form it
+ * arrives in is mapped to "not stated" before any coercion happens.
+ */
+const salaryAmountSchema = z.preprocess(
+  value => (value === '' || value === null || value === undefined || (typeof value === 'number' && Number.isNaN(value))
+    ? null
+    : value),
+  z.coerce.number()
+    .int('Enter a whole number')
+    .min(0, 'Salary cannot be negative')
+    .max(100_000_000, 'That is higher than any pay a board will accept — check the amount.')
+    .nullable()
+    .default(null),
+)
+
 const formSchema = z.object({
   title: z.string().trim().min(1, 'Title is required').max(200, 'Title must be 200 characters or less'),
   description: z.string().trim().max(100_000, 'Description is too long'),
@@ -442,6 +496,21 @@ const formSchema = z.object({
   type: z.enum(['full_time', 'part_time', 'contract', 'internship']),
   experienceLevel: z.enum(['junior', 'mid', 'senior', 'lead']),
   remoteStatus: z.enum(['remote', 'hybrid', 'onsite']).optional(),
+  // Per-field only. Whether the parts add up to a range a board can read is
+  // checked in `salaryBlockers`, for the same reason the publish requirements
+  // live there: this schema also gates draft restore, and a draft caught
+  // mid-typing must still come back.
+  salaryMin: salaryAmountSchema,
+  salaryMax: salaryAmountSchema,
+  salaryCurrency: z.preprocess(
+    value => (typeof value === 'string' && value.trim() ? value.trim().toUpperCase() : null),
+    z.string().regex(/^[A-Z]{3}$/, 'Use a 3-letter currency code, like USD or NOK').nullable().default(null),
+  ),
+  salaryUnit: z.preprocess(
+    value => (value === '' ? null : value),
+    z.enum(['YEAR', 'MONTH', 'HOUR']).nullable().default(null),
+  ),
+  salaryNegotiable: z.boolean().default(false),
 })
 
 const draftQuestionSchema = z.object({
@@ -643,9 +712,13 @@ function loadForMode() {
     applySampleContent()
     revealStep(1)
     track('sample_job_started')
-    return
   }
-  restoreFormFromStorage()
+  else {
+    restoreFormFromStorage()
+  }
+  // Pay that is already filled in is not something to go hunting for behind a
+  // collapsed header.
+  showCompensation.value = hasSalaryDetails.value
 }
 
 onMounted(loadForMode)
@@ -681,7 +754,13 @@ function resetFormState() {
     type: 'full_time',
     experienceLevel: 'mid',
     remoteStatus: undefined,
+    salaryMin: null,
+    salaryMax: null,
+    salaryCurrency: null,
+    salaryUnit: 'YEAR',
+    salaryNegotiable: false,
   }
+  showCompensation.value = false
   applicationForm.value = {
     phoneRequirement: 'optional',
     requireResume: true,
@@ -753,6 +832,53 @@ const publishBlockers = computed(() => missingPublishRequirements({
 
 const descriptionChars = computed(() => descriptionLength(form.value.description))
 
+/**
+ * What a stated pay range still needs before it means anything.
+ *
+ * A bare pair of numbers is worse than no salary at all — the boards render it
+ * against whatever currency they assume, so "50000–70000" can reach candidates
+ * as dollars in a role that pays kroner. Only checked once the recruiter has
+ * actually typed an amount: saying nothing about pay stays free.
+ */
+const salaryBlockers = computed<{ field: string, reason: string }[]>(() => {
+  const { salaryMin, salaryMax, salaryCurrency, salaryUnit, salaryNegotiable } = form.value
+  if (salaryNegotiable) return []
+  if (salaryMin == null && salaryMax == null) return []
+
+  const blockers: { field: string, reason: string }[] = []
+  if (salaryMin != null && salaryMax != null && salaryMax < salaryMin) {
+    blockers.push({ field: 'salaryMax', reason: 'Maximum pay must be at least the minimum.' })
+  }
+  if (!salaryCurrency) {
+    blockers.push({ field: 'salaryCurrency', reason: 'Add a currency so boards show the range in the right money.' })
+  }
+  if (!salaryUnit) {
+    blockers.push({ field: 'salaryUnit', reason: 'Choose whether this is per year, month or hour.' })
+  }
+  return blockers
+})
+
+function validateSalary(): boolean {
+  if (salaryBlockers.value.length === 0) return true
+  // Never leave the reason folded away — this is what the Next button is
+  // waiting on, and submit bounces the user back to this step for it.
+  showCompensation.value = true
+  for (const blocker of salaryBlockers.value) {
+    errors.value = { ...errors.value, [blocker.field]: blocker.reason }
+  }
+  return false
+}
+
+/**
+ * Blur handler for the pay fields. The per-field rules live in the schema and
+ * the cross-field ones in `salaryBlockers`, so both have to run to get a
+ * complete answer — and `validateStep1` wipes `errors`, so it has to run first.
+ */
+function validateSalaryFields() {
+  validateStep1()
+  validateSalary()
+}
+
 function validatePublishRequirements(): boolean {
   if (publishBlockers.value.length === 0) return true
   for (const blocker of publishBlockers.value) {
@@ -766,11 +892,14 @@ function validateJobDetails(): boolean {
   // Order matters: `validateStep1` clears `errors`, so it has to run first.
   const schemaValid = validateStep1()
   const publishReady = validatePublishRequirements()
-  return schemaValid && publishReady
+  const salaryReady = validateSalary()
+  return schemaValid && publishReady && salaryReady
 }
 
 const canGoNext = computed(() => {
-  if (currentStep.value === 1) return isStep1Valid.value && publishBlockers.value.length === 0
+  if (currentStep.value === 1) {
+    return isStep1Valid.value && publishBlockers.value.length === 0 && salaryBlockers.value.length === 0
+  }
   return true
 })
 
@@ -843,6 +972,13 @@ async function handleSubmit(mode: 'publish' | 'draft' = publishChoice.value) {
     return
   }
 
+  // Applies to drafts too: a half-stated range is the kind of thing that gets
+  // published later without ever being looked at again.
+  if (!validateSalary()) {
+    currentStep.value = 1
+    return
+  }
+
   const normalizedForm = formSchema.parse(form.value)
   isSubmitting.value = true
   try {
@@ -856,6 +992,13 @@ async function handleSubmit(mode: 'publish' | 'draft' = publishChoice.value) {
       type: normalizedForm.type,
       experienceLevel: normalizedForm.experienceLevel,
       remoteStatus: normalizedForm.remoteStatus,
+      // "Negotiable" and a range are mutually exclusive on the public listing,
+      // so only one of them is ever sent.
+      salaryNegotiable: normalizedForm.salaryNegotiable,
+      salaryMin: normalizedForm.salaryNegotiable ? null : normalizedForm.salaryMin,
+      salaryMax: normalizedForm.salaryNegotiable ? null : normalizedForm.salaryMax,
+      salaryCurrency: normalizedForm.salaryNegotiable ? null : normalizedForm.salaryCurrency,
+      salaryUnit: normalizedForm.salaryNegotiable ? null : normalizedForm.salaryUnit,
       phoneRequirement: applicationForm.value.phoneRequirement,
       requireResume: applicationForm.value.requireResume,
       requireCoverLetter: applicationForm.value.requireCoverLetter,
@@ -968,6 +1111,81 @@ async function handleSubmit(mode: 'publish' | 'draft' = publishChoice.value) {
 async function saveAsDraftFromUpsell() {
   showLimitUpsell.value = false
   await handleSubmit('draft')
+}
+
+/** The pay line on the step 4 review, or nothing when pay was left unstated. */
+const salarySummary = computed(() => {
+  const { salaryMin, salaryMax, salaryCurrency, salaryUnit, salaryNegotiable } = form.value
+  if (salaryNegotiable) return 'Negotiable'
+  if (salaryMin == null && salaryMax == null) return null
+
+  const amounts = [salaryMin, salaryMax].filter((value): value is number => value != null)
+  const unit = salaryUnit ? ` per ${salaryUnit.toLowerCase()}` : ''
+  return `${salaryCurrency ?? ''} ${amounts.map(value => value.toLocaleString()).join(' – ')}${unit}`.trim()
+})
+
+/** Suggestions only — any ISO 4217 code can still be typed. */
+const COMMON_CURRENCIES = ['NOK', 'SEK', 'DKK', 'EUR', 'GBP', 'USD', 'CHF', 'PLN', 'CAD', 'AUD']
+
+/**
+ * Pay amounts are grouped as they are typed — "3,000,000" rather than
+ * "3000000", where a missing or extra zero is genuinely hard to see.
+ *
+ * Commas regardless of locale, and every non-digit stripped on the way back in.
+ * A locale-aware separator would be the obvious alternative, but `nb-NO` groups
+ * with a non-breaking space, which is invisible in an input and does not survive
+ * being pasted back out.
+ */
+const SALARY_MAX_DIGITS = 9
+
+function groupDigits(digits: string): string {
+  return digits.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+}
+
+function formatSalaryInput(value: number | null): string {
+  return value == null ? '' : groupDigits(String(value))
+}
+
+const salaryMinDisplay = computed(() => formatSalaryInput(form.value.salaryMin))
+const salaryMaxDisplay = computed(() => formatSalaryInput(form.value.salaryMax))
+
+/**
+ * Reads the digits out of whatever was typed and writes the grouped form back.
+ *
+ * The caret is placed by counting digits rather than characters: inserting a
+ * comma shifts every position after it, so restoring the raw offset would drop
+ * the caret a place backwards on each group boundary the user types past.
+ *
+ * The field itself stays `number | null`. A cleared input hands back `''`, and
+ * `'' != null`, so an empty string left in state would read as a stated salary
+ * and start demanding a currency for it.
+ */
+function onSalaryInput(field: 'salaryMin' | 'salaryMax', event: Event) {
+  const input = event.target as HTMLInputElement
+  const digitsBeforeCaret = (input.value.slice(0, input.selectionStart ?? input.value.length).match(/\d/g) ?? []).length
+
+  const digits = input.value.replace(/\D/g, '').slice(0, SALARY_MAX_DIGITS).replace(/^0+(?=\d)/, '')
+  form.value[field] = digits ? Number.parseInt(digits, 10) : null
+
+  const formatted = groupDigits(digits)
+  input.value = formatted
+
+  // Walk forward past `digitsBeforeCaret` digits, so the caret lands in the
+  // same place in the number even though the separators have moved.
+  let caret = 0
+  let seen = 0
+  while (caret < formatted.length && seen < digitsBeforeCaret) {
+    if (/\d/.test(formatted[caret]!)) seen++
+    caret++
+  }
+  input.setSelectionRange(caret, caret)
+}
+
+function onCurrencyInput(event: Event) {
+  const raw = (event.target as HTMLInputElement).value.trim().toUpperCase()
+  // Uppercased in state, not just in CSS: the feed writes whatever is stored,
+  // and a lowercase code is not a currency to an aggregator.
+  form.value.salaryCurrency = raw || null
 }
 
 const typeOptions = [
@@ -1203,6 +1421,123 @@ const typeOptions = [
                     <option value="hybrid">Hybrid</option>
                     <option value="onsite">On-site</option>
                   </select>
+                </div>
+              </div>
+
+              <!-- Compensation -->
+              <div class="rounded-xl border border-surface-200 dark:border-surface-800 bg-surface-50/60 dark:bg-surface-900/50">
+                <button
+                  type="button"
+                  class="flex w-full items-center gap-3 p-5 text-left"
+                  :aria-expanded="showCompensation"
+                  aria-controls="compensation-panel"
+                  @click="showCompensation = !showCompensation"
+                >
+                  <ChevronRight
+                    class="size-4 shrink-0 text-surface-400 transition-transform"
+                    :class="showCompensation && 'rotate-90'"
+                  />
+                  <span class="min-w-0 flex-1">
+                    <span class="flex items-center gap-2">
+                      <span class="text-sm font-semibold text-surface-800 dark:text-surface-200">Compensation</span>
+                      <span class="inline-flex items-center rounded-md bg-surface-100 dark:bg-surface-800 px-2 py-0.5 text-[10px] font-medium text-surface-500 dark:text-surface-400">Optional</span>
+                    </span>
+                    <!-- Collapsed, the header is the only thing saying what is
+                         inside — so it carries the value rather than the pitch. -->
+                    <span v-if="!showCompensation" class="mt-0.5 block truncate text-xs text-surface-500 dark:text-surface-400">
+                      {{ salarySummary ?? 'Not stated — roles that state pay rank higher on Google Jobs and most aggregators.' }}
+                    </span>
+                  </span>
+                </button>
+
+                <div v-if="showCompensation" id="compensation-panel" class="px-5 pb-5">
+                  <p class="text-xs text-surface-500 dark:text-surface-400">
+                    Roles that state pay get a rich result on Google Jobs and are sorted higher by most aggregators. You can change this later in job settings.
+                  </p>
+
+                <label class="mt-4 flex cursor-pointer items-center gap-3">
+                  <input
+                    v-model="form.salaryNegotiable"
+                    type="checkbox"
+                    class="size-4 shrink-0 rounded border-surface-300 dark:border-surface-600 text-brand-600 focus:ring-brand-500"
+                  />
+                  <span class="text-sm text-surface-700 dark:text-surface-300">
+                    Pay is negotiable — show "Negotiable" instead of a range
+                  </span>
+                </label>
+
+                <div v-if="!form.salaryNegotiable" class="mt-4 grid grid-cols-2 gap-4 lg:grid-cols-4">
+                  <div>
+                    <label for="salary-min" class="block text-xs font-medium text-surface-700 dark:text-surface-300 mb-1">Minimum</label>
+                    <input
+                      id="salary-min"
+                      :value="salaryMinDisplay"
+                      type="text"
+                      inputmode="numeric"
+                      autocomplete="off"
+                      placeholder="e.g. 500,000"
+                      @input="onSalaryInput('salaryMin', $event)"
+                      class="w-full rounded-lg border px-3 py-2 text-sm text-surface-900 dark:text-surface-100 bg-white dark:bg-surface-900 placeholder:text-surface-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-colors"
+                      :class="errors.salaryMin ? 'border-danger-300 ring-1 ring-danger-100' : 'border-surface-300 dark:border-surface-700'"
+                      @blur="validateSalaryFields"
+                    />
+                    <p v-if="errors.salaryMin" class="mt-1 text-xs font-medium text-danger-600 dark:text-danger-400">{{ errors.salaryMin }}</p>
+                  </div>
+                  <div>
+                    <label for="salary-max" class="block text-xs font-medium text-surface-700 dark:text-surface-300 mb-1">Maximum</label>
+                    <input
+                      id="salary-max"
+                      :value="salaryMaxDisplay"
+                      type="text"
+                      inputmode="numeric"
+                      autocomplete="off"
+                      placeholder="e.g. 650,000"
+                      @input="onSalaryInput('salaryMax', $event)"
+                      class="w-full rounded-lg border px-3 py-2 text-sm text-surface-900 dark:text-surface-100 bg-white dark:bg-surface-900 placeholder:text-surface-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-colors"
+                      :class="errors.salaryMax ? 'border-danger-300 ring-1 ring-danger-100' : 'border-surface-300 dark:border-surface-700'"
+                      @blur="validateSalaryFields"
+                    />
+                    <p v-if="errors.salaryMax" class="mt-1 text-xs font-medium text-danger-600 dark:text-danger-400">{{ errors.salaryMax }}</p>
+                  </div>
+                  <div>
+                    <label for="salary-currency" class="block text-xs font-medium text-surface-700 dark:text-surface-300 mb-1">Currency</label>
+                    <input
+                      id="salary-currency"
+                      :value="form.salaryCurrency"
+                      list="salary-currency-options"
+                      type="text"
+                      maxlength="3"
+                      autocomplete="off"
+                      placeholder="NOK"
+                      class="w-full rounded-lg border px-3 py-2 text-sm uppercase text-surface-900 dark:text-surface-100 bg-white dark:bg-surface-900 placeholder:text-surface-400 placeholder:normal-case focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-colors"
+                      :class="errors.salaryCurrency ? 'border-danger-300 ring-1 ring-danger-100' : 'border-surface-300 dark:border-surface-700'"
+                      @input="onCurrencyInput"
+                      @blur="validateSalaryFields"
+                    />
+                    <!-- A list, not a select: the common codes are one keystroke
+                         away without shutting out the other 150. -->
+                    <datalist id="salary-currency-options">
+                      <option v-for="code in COMMON_CURRENCIES" :key="code" :value="code" />
+                    </datalist>
+                    <p v-if="errors.salaryCurrency" class="mt-1 text-xs font-medium text-danger-600 dark:text-danger-400">{{ errors.salaryCurrency }}</p>
+                  </div>
+                  <div>
+                    <label for="salary-unit" class="block text-xs font-medium text-surface-700 dark:text-surface-300 mb-1">Per</label>
+                    <select
+                      id="salary-unit"
+                      v-model="form.salaryUnit"
+                      class="w-full rounded-lg border px-3 py-2 text-sm text-surface-900 dark:text-surface-100 bg-white dark:bg-surface-900 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-colors"
+                      :class="errors.salaryUnit ? 'border-danger-300 ring-1 ring-danger-100' : 'border-surface-300 dark:border-surface-700'"
+                      @change="validateSalaryFields"
+                    >
+                      <option :value="null">Not specified</option>
+                      <option value="YEAR">Year</option>
+                      <option value="MONTH">Month</option>
+                      <option value="HOUR">Hour</option>
+                    </select>
+                    <p v-if="errors.salaryUnit" class="mt-1 text-xs font-medium text-danger-600 dark:text-danger-400">{{ errors.salaryUnit }}</p>
+                  </div>
+                </div>
                 </div>
               </div>
 
@@ -1908,6 +2243,12 @@ const typeOptions = [
                         <Link2 class="size-3.5" /> Location
                       </dt>
                       <dd class="text-surface-900 dark:text-surface-100">{{ locationDisplay }}</dd>
+                    </div>
+                    <div v-if="salarySummary" class="flex items-start gap-3">
+                      <dt class="flex items-center gap-1.5 text-surface-500 dark:text-surface-400 shrink-0 w-32">
+                        <Banknote class="size-3.5" /> Pay
+                      </dt>
+                      <dd class="text-surface-900 dark:text-surface-100">{{ salarySummary }}</dd>
                     </div>
                     <div class="flex items-start gap-3">
                       <dt class="flex items-center gap-1.5 text-surface-500 dark:text-surface-400 shrink-0 w-32">

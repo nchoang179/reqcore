@@ -46,6 +46,11 @@ export const SAMPLE_JOB_FORM = {
   type: 'full_time' as const,
   experienceLevel: 'mid' as const,
   remoteStatus: 'hybrid' as const,
+  salaryMin: 32000 as number | null,
+  salaryMax: 38000 as number | null,
+  salaryCurrency: 'GBP' as string | null,
+  salaryUnit: 'YEAR' as 'YEAR' | 'MONTH' | 'HOUR' | null,
+  salaryNegotiable: false,
 }
 
 /** Two questions — enough to show the form builder without a wall of fields. */

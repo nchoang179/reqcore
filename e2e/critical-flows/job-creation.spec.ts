@@ -63,6 +63,27 @@ test.describe('Job Creation Flow', () => {
     await selectJobLocation(page)
 
     await expect(continueButton).toBeEnabled()
+
+    // Pay is optional, and folded away until asked for.
+    await expect(page.getByLabel('Minimum')).toBeHidden()
+    await page.getByRole('button', { name: /Compensation/ }).click()
+
+    // A number with no currency is not optional, though: boards would render
+    // the range against whatever money they assume.
+    await page.getByLabel('Minimum').fill('650000')
+    // Grouped as it is typed, so a stray zero is visible.
+    await expect(page.getByLabel('Minimum')).toHaveValue('650,000')
+    await expect(continueButton).toBeDisabled()
+    await page.getByLabel('Currency').fill('nok')
+    await expect(page.getByLabel('Currency')).toHaveValue('NOK')
+    await expect(continueButton).toBeEnabled()
+
+    // A maximum below the minimum is the other way the range stops making sense.
+    await page.getByLabel('Maximum').fill('500000')
+    await expect(continueButton).toBeDisabled()
+    await page.getByLabel('Maximum').fill('750000')
+    await expect(continueButton).toBeEnabled()
+
     await continueButton.click()
 
     await page.getByRole('button', { name: 'Add a question', exact: true }).click()
