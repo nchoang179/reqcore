@@ -2,8 +2,7 @@
 import {
   Briefcase, Users, FileText, Calendar, Plus,
   ArrowRight, TrendingUp, Clock, AlertCircle,
-  Eye, UserPlus, ExternalLink,
-  LayoutDashboard, Zap,
+  ExternalLink, MessageSquare, CornerUpLeft,
 } from 'lucide-vue-next'
 
 definePageMeta({
@@ -32,6 +31,7 @@ const {
   jobsByStatus,
   recentApplications,
   topJobs,
+  unansweredReplies,
   fetchStatus,
   error,
   refresh,
@@ -139,6 +139,28 @@ function formatDate(dateStr: string) {
   if (diffHours < 24) return `${diffHours}h ago`
   if (diffDays < 7) return `${diffDays}d ago`
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
+
+// ─────────────────────────────────────────────
+// Unanswered replies
+// ─────────────────────────────────────────────
+
+/**
+ * Straight into the thread, not the application overview: the point of the card
+ * is answering the reply, and the Inbox tab is the only place you can. There is
+ * no standalone conversation route — `/dashboard/inbox` is referenced by
+ * notification emails but no such page exists — so the tab deep link is it.
+ */
+function replyLink(reply: (typeof unansweredReplies.value)[number]) {
+  return localePath({
+    path: `/dashboard/applications/${reply.applicationId}`,
+    query: { tab: 'inbox' },
+  })
+}
+
+const replyKindLabels: Record<string, string> = {
+  interview_response: 'Interview response',
+  message: 'Reply',
 }
 
 const isEmpty = computed(() =>
@@ -259,39 +281,45 @@ const isEmpty = computed(() =>
           </div>
         </NuxtLink>
 
-        <!-- To Review -->
+        <!-- To Review — applicants this user has never opened (read receipts,
+             see server/utils/applicationViews.ts), matching the "unviewed"
+             badges on /jobs. Not the `new` stage: a pile of applications
+             everyone has already read through isn't a to-do. -->
         <NuxtLink
-          :to="localePath({ path: '/dashboard/applications', query: { status: 'new' } })"
+          :to="localePath({ path: '/dashboard/applications', query: { viewed: 'unviewed' } })"
+          :title="counts.unviewedApplications > 0
+            ? `${counts.unviewedApplications} applicant${counts.unviewedApplications === 1 ? '' : 's'} you haven't opened yet`
+            : `You've opened every applicant waiting on you`"
           class="group relative rounded-2xl bg-white dark:bg-surface-900 p-5 sm:p-6 no-underline overflow-hidden isolate transition-all duration-300 hover:-translate-y-0.5"
-          :class="counts.newApplications > 0
+          :class="counts.unviewedApplications > 0
             ? 'ring-1 ring-warning-400/30 dark:ring-warning-500/20 hover:ring-warning-500/40 dark:hover:ring-warning-400/30 shadow-sm shadow-warning-500/[0.06] hover:shadow-lg hover:shadow-warning-500/[0.12]'
             : 'ring-1 ring-surface-950/[0.04] dark:ring-white/[0.06] hover:ring-surface-300/50 dark:hover:ring-surface-600/30 hover:shadow-lg hover:shadow-surface-500/[0.04]'"
         >
           <div
             class="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent to-transparent transition-opacity duration-500"
-            :class="counts.newApplications > 0
+            :class="counts.unviewedApplications > 0
               ? 'via-warning-500 opacity-60 group-hover:opacity-100'
               : 'via-surface-400 opacity-0 group-hover:opacity-40'"
           />
-          <AlertCircle class="absolute -bottom-3 -right-3 size-24 rotate-12 transition-transform duration-700 ease-out group-hover:rotate-3 group-hover:scale-110 pointer-events-none" :class="counts.newApplications > 0 ? 'text-warning-500/[0.04] dark:text-warning-400/[0.06]' : 'text-surface-400/[0.03] dark:text-surface-500/[0.05]'" />
+          <AlertCircle class="absolute -bottom-3 -right-3 size-24 rotate-12 transition-transform duration-700 ease-out group-hover:rotate-3 group-hover:scale-110 pointer-events-none" :class="counts.unviewedApplications > 0 ? 'text-warning-500/[0.04] dark:text-warning-400/[0.06]' : 'text-surface-400/[0.03] dark:text-surface-500/[0.05]'" />
           <div class="relative">
             <div class="flex items-baseline gap-2">
               <span
                 class="text-3xl sm:text-4xl font-black tracking-tight tabular-nums leading-none transition-colors duration-300"
-                :class="counts.newApplications > 0
+                :class="counts.unviewedApplications > 0
                   ? 'text-warning-600 dark:text-warning-400 group-hover:text-warning-700 dark:group-hover:text-warning-300'
                   : 'text-surface-900 dark:text-surface-50 group-hover:text-surface-600 dark:group-hover:text-surface-300'"
               >
-                {{ counts.newApplications }}
+                {{ counts.unviewedApplications }}
               </span>
               <span class="relative shrink-0 mb-1">
-                <span class="size-1.5 rounded-full block" :class="counts.newApplications > 0 ? 'bg-warning-500' : 'bg-surface-300 dark:bg-surface-600'" />
-                <span v-if="counts.newApplications > 0" class="absolute inset-0 size-1.5 rounded-full bg-warning-500 animate-ping" />
+                <span class="size-1.5 rounded-full block" :class="counts.unviewedApplications > 0 ? 'bg-warning-500' : 'bg-surface-300 dark:bg-surface-600'" />
+                <span v-if="counts.unviewedApplications > 0" class="absolute inset-0 size-1.5 rounded-full bg-warning-500 animate-ping" />
               </span>
             </div>
             <span class="block mt-3 text-[11px] font-semibold uppercase tracking-[0.1em] text-surface-400 dark:text-surface-500">To Review</span>
-            <p class="text-[11px] mt-1" :class="counts.newApplications > 0 ? 'text-warning-500 dark:text-warning-500 font-medium' : 'text-surface-300 dark:text-surface-600'">
-              {{ counts.newApplications > 0 ? 'Needs attention' : 'All reviewed' }}
+            <p class="text-[11px] mt-1" :class="counts.unviewedApplications > 0 ? 'text-warning-500 dark:text-warning-500 font-medium' : 'text-surface-300 dark:text-surface-600'">
+              {{ counts.unviewedApplications > 0 ? "You haven't viewed" : 'All viewed' }}
             </p>
           </div>
         </NuxtLink>
@@ -515,53 +543,75 @@ const isEmpty = computed(() =>
             </div>
           </div>
 
-          <!-- ─── Quick actions ─── -->
+          <!-- ─── Unanswered replies ───
+               Threads where the candidate spoke last. Unlike the counts above
+               this is a work queue: every row clears itself as soon as anything
+               goes back out on the thread. -->
           <div class="rounded-2xl border border-surface-200/80 dark:border-surface-800 bg-white dark:bg-surface-900 overflow-hidden shadow-xs dark:shadow-none">
-            <div class="flex items-center gap-2.5 px-5 py-4 border-b border-surface-100 dark:border-surface-800">
-              <div class="flex items-center justify-center size-7 rounded-lg bg-surface-100 dark:bg-surface-800">
-                <Zap class="size-3.5 text-surface-500 dark:text-surface-400" />
+            <div class="flex items-center justify-between px-5 py-4 border-b border-surface-100 dark:border-surface-800">
+              <div class="flex items-center gap-2.5">
+                <div
+                  class="flex items-center justify-center size-7 rounded-lg"
+                  :class="counts.unansweredReplies > 0 ? 'bg-rose-50 dark:bg-rose-950/40' : 'bg-surface-100 dark:bg-surface-800'"
+                >
+                  <MessageSquare
+                    class="size-3.5"
+                    :class="counts.unansweredReplies > 0 ? 'text-rose-500 dark:text-rose-400' : 'text-surface-500 dark:text-surface-400'"
+                  />
+                </div>
+                <h2 class="text-sm font-semibold text-surface-900 dark:text-surface-100">Unanswered Replies</h2>
               </div>
-              <h2 class="text-sm font-semibold text-surface-900 dark:text-surface-100">Quick Actions</h2>
+              <span
+                v-if="counts.unansweredReplies > 0"
+                class="inline-flex items-center rounded-full bg-rose-50 dark:bg-rose-950/40 px-2 py-0.5 text-[10px] font-semibold text-rose-700 dark:text-rose-400 tabular-nums"
+              >
+                {{ counts.unansweredReplies }}
+              </span>
             </div>
 
-            <div class="p-2.5 space-y-0.5">
-              <NuxtLink
-                :to="localePath('/dashboard/jobs/new')"
-                class="flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium text-surface-600 dark:text-surface-400 hover:bg-brand-50 dark:hover:bg-brand-950/30 hover:text-brand-700 dark:hover:text-brand-300 transition-all no-underline group/action"
-              >
-                <div class="flex items-center justify-center size-8 rounded-lg bg-brand-50 dark:bg-brand-950/40 group-hover/action:bg-brand-100 dark:group-hover/action:bg-brand-950/60 transition-colors">
-                  <Plus class="size-4 text-brand-600 dark:text-brand-400" />
-                </div>
-                Create new job
-              </NuxtLink>
-              <NuxtLink
-                :to="localePath('/dashboard/candidates/new')"
-                class="flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium text-surface-600 dark:text-surface-400 hover:bg-violet-50 dark:hover:bg-violet-950/30 hover:text-violet-700 dark:hover:text-violet-300 transition-all no-underline group/action"
-              >
-                <div class="flex items-center justify-center size-8 rounded-lg bg-violet-50 dark:bg-violet-950/40 group-hover/action:bg-violet-100 dark:group-hover/action:bg-violet-950/60 transition-colors">
-                  <UserPlus class="size-4 text-violet-600 dark:text-violet-400" />
-                </div>
-                Add candidate
-              </NuxtLink>
-              <NuxtLink
-                :to="localePath('/dashboard/applications')"
-                class="flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium text-surface-600 dark:text-surface-400 hover:bg-teal-50 dark:hover:bg-teal-950/30 hover:text-teal-700 dark:hover:text-teal-300 transition-all no-underline group/action"
-              >
-                <div class="flex items-center justify-center size-8 rounded-lg bg-teal-50 dark:bg-teal-950/40 group-hover/action:bg-teal-100 dark:group-hover/action:bg-teal-950/60 transition-colors">
-                  <Eye class="size-4 text-teal-600 dark:text-teal-400" />
-                </div>
-                Review applications
-              </NuxtLink>
-              <NuxtLink
-                :to="localePath('/dashboard/interviews')"
-                class="flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium text-surface-600 dark:text-surface-400 hover:bg-amber-50 dark:hover:bg-amber-950/30 hover:text-amber-700 dark:hover:text-amber-300 transition-all no-underline group/action"
-              >
-                <div class="flex items-center justify-center size-8 rounded-lg bg-amber-50 dark:bg-amber-950/40 group-hover/action:bg-amber-100 dark:group-hover/action:bg-amber-950/60 transition-colors">
-                  <Calendar class="size-4 text-amber-600 dark:text-amber-400" />
-                </div>
-                View interviews
-              </NuxtLink>
+            <div v-if="unansweredReplies.length === 0" class="px-5 py-10 text-center">
+              <div class="mx-auto mb-4 flex items-center justify-center size-12 rounded-2xl bg-surface-100 dark:bg-surface-800">
+                <MessageSquare class="size-5 text-surface-400 dark:text-surface-500" />
+              </div>
+              <p class="text-sm font-medium text-surface-500 dark:text-surface-400 mb-0.5">Nothing waiting on you</p>
+              <p class="text-xs text-surface-400 dark:text-surface-500">Candidates who write back appear here</p>
             </div>
+
+            <template v-else>
+              <div class="divide-y divide-surface-100 dark:divide-surface-800">
+                <NuxtLink
+                  v-for="reply in unansweredReplies"
+                  :key="reply.conversationId"
+                  :to="replyLink(reply)"
+                  class="block px-5 py-3.5 hover:bg-surface-50 dark:hover:bg-surface-800/40 transition-colors no-underline group"
+                >
+                  <div class="flex items-center justify-between mb-1.5 gap-2">
+                    <span class="text-sm font-medium text-surface-900 dark:text-surface-100 truncate group-hover:text-brand-600 dark:group-hover:text-brand-400 transition-colors">
+                      {{ formatPersonName(reply.candidateFirstName, reply.candidateLastName) }}
+                    </span>
+                    <span class="text-[11px] text-surface-400 dark:text-surface-500 shrink-0 tabular-nums font-medium">
+                      {{ formatDate(reply.receivedAt) }}
+                    </span>
+                  </div>
+                  <div class="flex items-start gap-1.5 text-xs text-surface-500 dark:text-surface-400 mb-1">
+                    <CornerUpLeft class="size-3 shrink-0 mt-0.5 text-surface-300 dark:text-surface-600" />
+                    <span class="line-clamp-2">{{ reply.bodyText }}</span>
+                  </div>
+                  <div class="flex items-center gap-2 text-[11px] text-surface-400 dark:text-surface-500 pl-4.5">
+                    <span class="truncate">{{ reply.jobTitle }}</span>
+                    <span class="text-surface-200 dark:text-surface-700">·</span>
+                    <span class="shrink-0">{{ replyKindLabels[reply.kind] ?? 'Reply' }}</span>
+                  </div>
+                </NuxtLink>
+              </div>
+
+              <div
+                v-if="counts.unansweredReplies > unansweredReplies.length"
+                class="px-5 py-2.5 border-t border-surface-100 dark:border-surface-800 text-[11px] text-surface-400 dark:text-surface-500 text-center"
+              >
+                +{{ counts.unansweredReplies - unansweredReplies.length }} more waiting
+              </div>
+            </template>
           </div>
         </div>
       </div>

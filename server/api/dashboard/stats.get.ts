@@ -4,11 +4,12 @@ import { application, candidate, job } from '../../database/schema'
 /**
  * GET /api/dashboard/stats
  * Returns aggregated dashboard data for the current organization:
- * - Summary counts (open jobs, candidates, applications, unreviewed)
+ * - Summary counts (open jobs, candidates, applications, unviewed applicants)
  * - Pipeline breakdown (application count per status)
  * - Jobs breakdown (job count per status)
  * - Recent applications (last 10 with candidate + job info)
  * - Top active jobs (open jobs sorted by application count, top 5)
+ * - Unanswered candidate replies (threads where the candidate spoke last)
  */
 export default defineEventHandler(async (event) => {
   const session = await requirePermission(event, { job: ['read'], candidate: ['read'], application: ['read'] })
@@ -29,11 +30,13 @@ export default defineEventHandler(async (event) => {
     openJobsCount,
     totalCandidatesCount,
     totalApplicationsCount,
-    newApplicationsCount,
+    unviewedApplicationsCount,
     pipelineRows,
     jobStatusRows,
     recentApplications,
     topJobs,
+    unansweredReplyList,
+    unansweredReplyTotal,
   ] = await Promise.all([
     // 1. Open jobs count
     db.$count(job, and(eq(job.organizationId, orgId), eq(job.status, 'open'))),
@@ -44,8 +47,11 @@ export default defineEventHandler(async (event) => {
     // 3. Total applications
     db.$count(application, activeApplicationCondition),
 
-    // 4. New (unreviewed) applications
-    db.$count(application, and(activeApplicationCondition, eq(application.status, 'new'))),
+    // 4. Applicants this user has never opened. Read receipts, not the `new`
+    //    stage: a stack of applications someone has already read through isn't a
+    //    to-do, and moving a candidate along the pipeline is a separate decision
+    //    from having looked at them. Matches the per-job badges on /jobs.
+    unviewedApplicationCount({ organizationId: orgId, userId: session.user.id }),
 
     // 5. Pipeline breakdown — application count per status
     db
@@ -112,6 +118,14 @@ export default defineEventHandler(async (event) => {
       .groupBy(job.id)
       .orderBy(sql`count(${application.id}) desc`)
       .limit(5),
+
+    // 9. Candidate replies still owed an answer — threads whose newest message
+    //    is inbound. Not `unreadCount`: nothing clears that counter, so it can
+    //    only grow. See server/utils/unansweredReplies.ts.
+    unansweredReplies({ organizationId: orgId, limit: 5 }),
+
+    // 10. Total waiting threads, so the card can say "+N more" honestly.
+    unansweredReplyCount({ organizationId: orgId }),
   ])
 
   // ─────────────────────────────────────────────
@@ -144,11 +158,13 @@ export default defineEventHandler(async (event) => {
       openJobs: openJobsCount,
       totalCandidates: totalCandidatesCount,
       totalApplications: totalApplicationsCount,
-      newApplications: newApplicationsCount,
+      unviewedApplications: unviewedApplicationsCount,
+      unansweredReplies: unansweredReplyTotal,
     },
     pipeline,
     jobsByStatus,
     recentApplications,
     topJobs,
+    unansweredReplies: unansweredReplyList,
   }
 })

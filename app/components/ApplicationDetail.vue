@@ -10,12 +10,16 @@ import type { Component } from 'vue'
 import type { Interview } from '~/composables/useInterviews'
 import { usePreviewReadOnly } from '~/composables/usePreviewReadOnly'
 import { APPLICATION_STATUS_TRANSITIONS } from '~~/shared/status-transitions'
+import type { ApplicationDetailTab } from '~~/shared/application-detail-tabs'
 
 const props = withDefaults(defineProps<{
   applicationId: string
   variant?: 'page' | 'drawer'
+  /** Tab to open on. Lets deep links land on a tab (e.g. `?tab=inbox`). */
+  initialTab?: ApplicationDetailTab
 }>(), {
   variant: 'page',
+  initialTab: 'overview',
 })
 
 const emit = defineEmits<{
@@ -45,8 +49,8 @@ useSeoMeta({
 // Tabs & Overview section toggles
 // ─────────────────────────────────────────────
 
-type DetailTab = 'overview' | 'inbox' | 'cover-letter' | 'interviews' | 'documents' | 'responses' | 'ai-analysis' | 'timeline' | 'properties' | 'notes'
-const detailTab = ref<DetailTab>('overview')
+type DetailTab = ApplicationDetailTab
+const detailTab = ref<DetailTab>(props.initialTab)
 
 // Toggle the page between centered (max-w-4xl) and full width
 const isWideDetail = ref(false)
@@ -636,7 +640,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeyNavigation)
 // ─────────────────────────────────────────────
 
 watch(() => props.applicationId, () => {
-  detailTab.value = 'overview'
+  // Back to the requested tab, not a hardcoded 'overview': navigating between
+  // two `?tab=inbox` deep links keeps the component mounted, and resetting to
+  // overview there would contradict the URL.
+  detailTab.value = props.initialTab
   isWideDetail.value = false
   expandedInterviewId.value = null
   showOverviewDropdown.value = false

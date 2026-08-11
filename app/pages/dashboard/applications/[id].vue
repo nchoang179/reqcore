@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ArrowLeft } from 'lucide-vue-next'
+import { parseApplicationDetailTab } from '~~/shared/application-detail-tabs'
 
 definePageMeta({
   layout: 'dashboard',
@@ -10,13 +11,16 @@ const route = useRoute()
 const applicationId = route.params.id as string
 const localePath = useLocalePath()
 
+/** `?tab=inbox` deep-links straight to the candidate conversation. */
+const initialTab = computed(() => parseApplicationDetailTab(route.query.tab))
+
 async function handleDeleted() {
   await navigateTo(localePath('/dashboard/applications'))
 }
 </script>
 
 <template>
-  <ApplicationDetail :application-id="applicationId" variant="page" @deleted="handleDeleted">
+  <ApplicationDetail :application-id="applicationId" :initial-tab="initialTab" variant="page" @deleted="handleDeleted">
     <template #top>
       <NuxtLink
         :to="$localePath('/dashboard/applications')"

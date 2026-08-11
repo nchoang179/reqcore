@@ -78,22 +78,20 @@ export async function viewedAtByApplication(params: {
 }
 
 /**
- * Per-job count of applications this user has never opened.
+ * The applications that still count as unviewed work for `userId`.
  *
  * Rejected applications are excluded: they've been decided on, so they aren't
  * work waiting for anyone — counting them would leave a permanent badge on
  * every job with a rejection. Quarantined candidates are excluded for the same
  * reason the pipeline counts exclude them (they aren't shown anywhere).
  *
- * Jobs with nothing unviewed are absent from the map.
+ * Shared by the per-job badges and the dashboard total so the two can never
+ * disagree about what "unviewed" means.
  */
-export async function unviewedCountsByJob(params: {
+export function unviewedApplicationCondition(params: {
   organizationId: string
   userId: string
-  jobIds: string[]
-}): Promise<Map<string, number>> {
-  if (params.jobIds.length === 0) return new Map()
-
+}) {
   const viewedApplicationIds = db
     .select({ applicationId: applicationView.applicationId })
     .from(applicationView)
@@ -110,17 +108,49 @@ export async function unviewedCountsByJob(params: {
       isNull(candidate.quarantinedAt),
     ))
 
+  return and(
+    eq(application.organizationId, params.organizationId),
+    inArray(application.candidateId, activeCandidateIds),
+    ne(application.status, 'rejected'),
+    notInArray(application.id, viewedApplicationIds),
+  )!
+}
+
+/**
+ * Per-job count of applications this user has never opened.
+ *
+ * Jobs with nothing unviewed are absent from the map.
+ */
+export async function unviewedCountsByJob(params: {
+  organizationId: string
+  userId: string
+  jobIds: string[]
+}): Promise<Map<string, number>> {
+  if (params.jobIds.length === 0) return new Map()
+
   const rows = await db
     .select({ jobId: application.jobId, count: count() })
     .from(application)
     .where(and(
-      eq(application.organizationId, params.organizationId),
+      unviewedApplicationCondition(params),
       inArray(application.jobId, params.jobIds),
-      inArray(application.candidateId, activeCandidateIds),
-      ne(application.status, 'rejected'),
-      notInArray(application.id, viewedApplicationIds),
     ))
     .groupBy(application.jobId)
 
   return new Map(rows.map(row => [row.jobId, Number(row.count)]))
+}
+
+/**
+ * Org-wide count of applications this user has never opened — the dashboard's
+ * "to review" number.
+ *
+ * Deliberately not scoped to open jobs: an applicant nobody has looked at is
+ * still waiting on you even if the job was since closed, and hiding them behind
+ * a job-status filter is how people go unanswered.
+ */
+export async function unviewedApplicationCount(params: {
+  organizationId: string
+  userId: string
+}): Promise<number> {
+  return db.$count(application, unviewedApplicationCondition(params))
 }
