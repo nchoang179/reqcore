@@ -6,7 +6,7 @@
  * entry. The endpoint returns whether Stripe billing is enabled, the current
  * subscription, and the org's usage against the count-based plan caps.
  */
-import { tierUsesFreeAllowances } from '~~/shared/billing'
+import { tierUsesFreeAllowances, type BillingTier } from '~~/shared/billing'
 
 export interface UsageMeter {
   used: number
@@ -15,7 +15,7 @@ export interface UsageMeter {
 }
 
 export interface BillingUsage {
-  tier: string
+  tier: BillingTier
   activeRoles: UsageMeter
   aiAnalysis: UsageMeter
   aiAssistant: UsageMeter
