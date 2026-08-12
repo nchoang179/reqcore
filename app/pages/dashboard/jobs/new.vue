@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import {
+  AlertTriangle,
   ArrowLeft,
   Check,
   Plus,
@@ -776,6 +777,7 @@ function resetFormState() {
   createdJobId.value = ''
   createdJobSlug.value = ''
   finalApplicationLink.value = ''
+  finalCopyState.value = 'idle'
   errors.value = {}
 }
 
@@ -797,7 +799,13 @@ const isPublished = ref(false)
 const createdJobSlug = ref('')
 const createdJobId = ref('')
 const finalApplicationLink = ref('')
-const linkCopiedFinal = ref(false)
+/**
+ * Whether the auto-copy on publish actually landed. The button promises a copy,
+ * so the success screen has to say which of the two happened — a blocked
+ * clipboard (insecure context, denied permission) otherwise sends the recruiter
+ * away believing they hold the link.
+ */
+const finalCopyState = ref<'idle' | 'copied' | 'failed'>('idle')
 
 function validateStep1(): boolean {
   const result = formSchema.safeParse(form.value)
@@ -1064,13 +1072,14 @@ async function handleSubmit(mode: 'publish' | 'draft' = publishChoice.value) {
         }
       }
 
-      // Auto-copy to clipboard
+      // Auto-copy to clipboard. Either outcome is reported on the success
+      // screen below; the copy is a convenience, never a reason to fail the
+      // publish that already succeeded.
       try {
         await navigator.clipboard.writeText(finalApplicationLink.value)
-        linkCopiedFinal.value = true
-        setTimeout(() => { linkCopiedFinal.value = false }, 3000)
+        finalCopyState.value = 'copied'
       } catch {
-        // Clipboard may not be available
+        finalCopyState.value = 'failed'
       }
 
       isPublished.value = true
@@ -2039,6 +2048,21 @@ const typeOptions = [
                     <h2 class="text-lg font-bold text-surface-900 dark:text-surface-100">Your job is live!</h2>
                     <p class="text-sm text-surface-500 dark:text-surface-400">
                       <strong>{{ form.title }}</strong> is now accepting applications.
+                    </p>
+                    <!-- The publish button promised a copy — say whether it happened. -->
+                    <p
+                      v-if="finalCopyState === 'copied'"
+                      class="mt-1.5 inline-flex items-center gap-1.5 text-sm font-medium text-success-700 dark:text-success-400"
+                    >
+                      <Check class="size-3.5 shrink-0" />
+                      Application link copied to your clipboard.
+                    </p>
+                    <p
+                      v-else-if="finalCopyState === 'failed'"
+                      class="mt-1.5 inline-flex items-center gap-1.5 text-sm font-medium text-warning-700 dark:text-warning-400"
+                    >
+                      <AlertTriangle class="size-3.5 shrink-0" />
+                      We couldn't copy the link — copy it from Application link below.
                     </p>
                   </div>
                   <NuxtLink
