@@ -17,6 +17,9 @@ vi.mock('../../server/utils/billing/plan', () => ({
 
 vi.mock('../../server/utils/ai/platformConfig', () => ({
   PLATFORM_AI_CONFIG_ID: '__platform__',
+  // Every tier may reach the platform key now; what differs is the allowance it
+  // draws against, which `budget.ts` enforces rather than this module.
+  canUsePlatformAi: vi.fn(async () => true),
   getPlatformAiOverride: vi.fn(async () => state.platformOverride),
   platformOverrideEnabled: vi.fn((row: null | { isEnabled: boolean }) => row?.isEnabled ?? true),
   resolvePlatformAiProviderConfig: vi.fn(async () => ({
@@ -47,8 +50,15 @@ describe('resolveAnalysisProvider grandfathered tier', () => {
 
   afterEach(() => vi.unstubAllGlobals())
 
-  it('does not fall back to the platform key for grandfathered orgs', async () => {
-    await expect(resolveAnalysisProvider('org_1')).rejects.toThrow('No AI config')
+  it('falls back to the platform key for grandfathered orgs', async () => {
+    // The tier was BYOK-only, which left orgs that never configured a key — the
+    // majority — unable to run AI at all. It now draws on the Free allowances
+    // instead, enforced in budget.ts rather than here.
+    await expect(resolveAnalysisProvider('org_1')).resolves.toMatchObject({
+      billingMode: 'platform',
+      provider: 'openrouter',
+      model: 'openai/gpt-5.4-mini',
+    })
   })
 
   it('still falls back to the platform key for normal free orgs', async () => {
@@ -62,6 +72,13 @@ describe('resolveAnalysisProvider grandfathered tier', () => {
 
   it('does not resurrect the platform fallback after it has been removed', async () => {
     state.plan = 'free'
+    state.platformOverride = { isEnabled: false, isDefaultAnalysis: false, model: 'openai/gpt-5.4-mini' }
+
+    await expect(resolveAnalysisProvider('org_1')).rejects.toThrow('No AI config')
+  })
+
+  it('still honours a removed platform engine on the grandfathered tier', async () => {
+    // Opening the tier up must not override an explicit per-org removal.
     state.platformOverride = { isEnabled: false, isDefaultAnalysis: false, model: 'openai/gpt-5.4-mini' }
 
     await expect(resolveAnalysisProvider('org_1')).rejects.toThrow('No AI config')

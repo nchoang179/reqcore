@@ -15,7 +15,6 @@
  * key never sits in a plaintext field on the config object.
  */
 import { encrypt } from '../encryption'
-import { resolveOrgPlanId } from '../billing/plan'
 import { loadAiConfig } from './loadConfig'
 import { OPENROUTER_BASE_URL, type ProviderConfig } from './provider'
 import {
@@ -49,7 +48,11 @@ export async function resolveAnalysisProvider(
 
   if (!opts.preferId) {
     const platformOverride = await getPlatformAiOverride(orgId)
-    if (platformOverride?.isEnabled && platformOverride.isDefaultAnalysis) {
+    // The plan check comes first: an override row on a BYOK-only plan holds the
+    // analysis slot but may not spend the platform key, and taking this branch
+    // would 422 inside `resolvePlatformAiProviderConfig` instead of falling
+    // through to the org's own config below.
+    if (platformOverride?.isEnabled && platformOverride.isDefaultAnalysis && await canUsePlatformAi(orgId)) {
       const platform = await resolvePlatformAiProviderConfig(orgId)
       return {
         ...platform,
@@ -76,8 +79,10 @@ export async function resolveAnalysisProvider(
   }
   catch (err) {
     // Grandfathered hosted orgs are free because they pay the LLM provider
-    // directly. If their BYOK config is missing, do not spend the platform key.
-    if (await resolveOrgPlanId(orgId) === 'grandfathered') throw err
+    // directly. If their BYOK config is missing, do not spend the platform key —
+    // unless the workspace carries an explicit `planExempt` grant, which is what
+    // `canUsePlatformAi` weighs.
+    if (!await canUsePlatformAi(orgId)) throw err
 
     // 2: no org config — fall back to the platform key if one is configured.
     const platformKey = env.OPENROUTER_API_KEY
@@ -126,6 +131,8 @@ export async function resolveAnalysisProvider(
  * (their free tier is explicitly BYOK-only, since they pay their LLM provider
  * directly) — so for them steps 3 and 5 are unavailable and a missing BYOK
  * config surfaces as the 422 rather than silently spending the platform key.
+ * A per-org `platformAiConfig.planExempt` grant lifts that exclusion for one
+ * workspace, restoring steps 3 and 5 for it alone.
  *
  * `model` is the composer's model picker and applies to the platform paths only.
  * A BYOK config carries its own model id — the org's key may not even be able to

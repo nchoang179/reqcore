@@ -64,6 +64,28 @@ export const ACTIVE_ROLE_LIMITS: Record<BillingTier, number> = {
 }
 
 /**
+ * Tiers that draw on the Free allowances below rather than a paid credit balance.
+ *
+ * `grandfathered` is here because its original bargain — free forever, but bring
+ * your own AI key — turned out to be one almost nobody took: the backfill moved
+ * existing free orgs onto the tier whether or not they had a key, and an org
+ * without one lost AI entirely. Metering them like a Free org gives the tier its
+ * AI back with a bounded cost, and is why the platform-AI check no longer
+ * excludes them. They keep their larger active-role allowance (ACTIVE_ROLE_LIMITS)
+ * and their BYOK entitlement, neither of which costs the platform anything.
+ *
+ * Deliberately *not* covered by this predicate, and still keyed on `free` alone:
+ * the `freePlanRestrictionsApply` model lockdown in the chatbot endpoints, which
+ * pins a workspace to the platform engine and one cheap model. That is a product
+ * boundary rather than a cost control, and applying it here would take away the
+ * key and model choice `grandfathered` was originally sold on. Same reasoning
+ * keeps BYOK assistant turns uncapped in `assertChatbotAllowance`.
+ */
+export function tierUsesFreeAllowances(tier: BillingTier): boolean {
+  return tier === 'free' || tier === 'grandfathered'
+}
+
+/**
  * Lifetime allowance of platform-paid AI analysis runs for a free org — the
  * count-based approximation of pricing-v5's "one free AI shortlist per account".
  * Once an org reaches this, platform AI is gated until they upgrade; ranking and

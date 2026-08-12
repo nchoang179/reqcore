@@ -26,6 +26,7 @@ import { creditPercentUsed } from '../ai/credits'
 import {
   activeRoleLimitForTier,
   FREE_PLAN_CANDIDATE_CONVERSATION_LIMIT,
+  tierUsesFreeAllowances,
   type BillingTier,
 } from '../../../shared/billing'
 
@@ -99,7 +100,7 @@ export async function getOrgUsage(orgId: string): Promise<OrgUsage> {
   const [openJobs, aiRuns, assistantUsage, conversations] = await Promise.all([
     countOpenJobs(orgId),
     countPlatformRuns(orgId),
-    tier === 'free'
+    tierUsesFreeAllowances(tier)
       ? getFreeChatbotPromptUsage(orgId)
       : getChatbotCreditUsage(orgId, tier),
     countStartedConversations(orgId),
@@ -115,9 +116,9 @@ export async function getOrgUsage(orgId: string): Promise<OrgUsage> {
     },
     aiAnalysis: {
       used: aiRuns,
-      limit: tier === 'free' ? freeRunLimit() : null,
+      limit: tierUsesFreeAllowances(tier) ? freeRunLimit() : null,
     },
-    aiAssistant: tier === 'free'
+    aiAssistant: tierUsesFreeAllowances(tier)
       ? { used: assistantUsage.used, limit: assistantUsage.allowance }
       : {
           // Percentage of a paid credit allowance, never its raw balance.
@@ -126,7 +127,7 @@ export async function getOrgUsage(orgId: string): Promise<OrgUsage> {
         },
     candidateConversations: {
       used: conversations,
-      limit: tier === 'free' ? FREE_PLAN_CANDIDATE_CONVERSATION_LIMIT : null,
+      limit: tierUsesFreeAllowances(tier) ? FREE_PLAN_CANDIDATE_CONVERSATION_LIMIT : null,
     },
   }
 }

@@ -3,6 +3,7 @@ import { candidateMessage } from '~~/server/database/schema'
 import {
   FREE_PLAN_CANDIDATE_CONVERSATION_LIMIT,
   type BillingTier,
+  tierUsesFreeAllowances,
 } from '~~/shared/billing'
 
 /** Any query runner — the global client or an open transaction. */
@@ -23,7 +24,7 @@ export function candidateMessageAllowanceFromUsage(
   tier: BillingTier,
   used: number,
 ): CandidateMessageAllowance {
-  if (tier !== 'free') {
+  if (!tierUsesFreeAllowances(tier)) {
     return { tier, used, limit: null, remaining: null, canSend: true }
   }
 
@@ -88,7 +89,7 @@ export async function canSendIntoConversation(
   tier: BillingTier,
   executor: DbExecutor = db,
 ): Promise<boolean> {
-  if (tier !== 'free') return true
+  if (!tierUsesFreeAllowances(tier)) return true
   if (await conversationHasLiveOutbound(orgId, conversationId, executor)) return true
   return (await countStartedConversations(orgId, executor)) < FREE_PLAN_CANDIDATE_CONVERSATION_LIMIT
 }

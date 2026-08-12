@@ -259,6 +259,35 @@ describe('analysis budget no longer shares a pot with the assistant', () => {
   })
 })
 
+describe('grandfathered tier draws on the Free allowances', () => {
+  // The tier used to be BYOK-only, so opening it to the platform key without
+  // metering it would have handed ~200 legacy orgs uncapped platform spend.
+  it('caps analysis runs at the free allowance rather than a monthly dollar cap', async () => {
+    state.plan = 'grandfathered'
+    state.counts.set(analysisRun, 9_999)
+    await expect(assertPlatformBudget('org-1')).rejects.toThrow(/free AI analysis runs/i)
+  })
+
+  it('lets a grandfathered org run analysis while under the allowance', async () => {
+    state.plan = 'grandfathered'
+    state.counts.set(analysisRun, 0)
+    await expect(assertPlatformBudget('org-1')).resolves.toBeUndefined()
+  })
+
+  it('meters platform assistant turns as prompts, not paid credits', async () => {
+    state.plan = 'grandfathered'
+    state.counts.set(aiUsageEvent, FREE_PLAN_CHATBOT_PROMPT_LIMIT)
+    await expect(assertChatbotAllowance('org-1', 'platform'))
+      .rejects.toMatchObject({ scope: 'org_chatbot_prompts' })
+  })
+
+  it('leaves BYOK assistant turns uncapped — the org pays for that key', async () => {
+    state.plan = 'grandfathered'
+    state.counts.set(aiUsageEvent, 9_999)
+    await expect(assertChatbotAllowance('org-1', 'byok')).resolves.toBeUndefined()
+  })
+})
+
 describe('assertPricedModel', () => {
   it('allows a model that is in the price table', () => {
     expect(() => assertPricedModel('openai/gpt-5.4-mini')).not.toThrow()

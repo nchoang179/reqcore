@@ -14,6 +14,7 @@
  * consumer must treat that as "uncapped", not "nothing left".
  */
 import { useBillingStatus } from '~/composables/useBillingStatus'
+import { tierUsesFreeAllowances } from '~~/shared/billing'
 
 /**
  * How little headroom is left before we say something. Below this the meter
@@ -30,7 +31,10 @@ export function useChatbotQuota() {
     return value?.enabled ? value.usage : null
   })
 
-  const isFree = computed(() => usage.value?.tier === 'free')
+  const isFree = computed(() => {
+    const tier = usage.value?.tier
+    return tier ? tierUsesFreeAllowances(tier) : false
+  })
   const used = computed(() => usage.value?.aiAssistant?.used ?? null)
   const limit = computed(() => usage.value?.aiAssistant?.limit ?? null)
 

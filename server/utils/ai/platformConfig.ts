@@ -1,7 +1,6 @@
 import { eq } from 'drizzle-orm'
 import { platformAiConfig } from '../../database/schema'
 import { encrypt } from '../encryption'
-import { resolveOrgPlanId } from '../billing/plan'
 import { OPENROUTER_BASE_URL, type ProviderConfig } from './provider'
 import { isChatbotCatalogueModel } from '../../../shared/chatbot-models'
 import { PLATFORM_ENGINE_ID } from '../../../shared/chatbot'
@@ -37,8 +36,16 @@ export async function getPlatformAiOverride(orgId: string): Promise<PlatformAiOv
   }) ?? null
 }
 
-export async function canUsePlatformAi(orgId: string): Promise<boolean> {
-  return Boolean(env.OPENROUTER_API_KEY) && (await resolveOrgPlanId(orgId)) !== 'grandfathered'
+/**
+ * Whether this org may route AI through the platform key at all.
+ *
+ * Every tier may, including `grandfathered`: that tier was BYOK-only until its
+ * allowances were aligned with Free (`tierUsesFreeAllowances`), which bounds what
+ * it can spend. Before that it was the one tier whose members could not run AI at
+ * all without bringing a key, which is exactly what most of them never did.
+ */
+export async function canUsePlatformAi(_orgId: string): Promise<boolean> {
+  return Boolean(env.OPENROUTER_API_KEY)
 }
 
 // The platform ("company") AI is server-managed: its model, display name and
