@@ -8,7 +8,10 @@ import {
 import { sendCandidateMessageEmail } from '~~/server/utils/email'
 import { assertOutboundMessageLimit } from '~~/server/utils/candidate-message-rate-limit'
 import { deleteFromS3, downloadFromS3, uploadToS3 } from '~~/server/utils/s3'
-import { FREE_PLAN_CANDIDATE_CONVERSATION_LIMIT } from '~~/shared/billing'
+import {
+  conversationCapStartFor,
+  FREE_PLAN_CANDIDATE_CONVERSATION_LIMIT,
+} from '~~/shared/billing'
 import { CANDIDATE_MESSAGE_MAX_REQUEST_BYTES } from '~~/shared/candidate-messaging'
 import {
   canSendIntoConversation,
@@ -119,7 +122,7 @@ export default defineEventHandler(async (event) => {
     // Replies into a started conversation are unlimited; only opening a new
     // conversation consumes one of the Free slots.
     if (!(await canSendIntoConversation(orgId, conversation.id, tier, tx))) {
-      const used = await countStartedConversations(orgId, tx)
+      const used = await countStartedConversations(orgId, tx, conversationCapStartFor(tier))
       throw createError({
         statusCode: 402,
         statusMessage: `You've started all ${FREE_PLAN_CANDIDATE_CONVERSATION_LIMIT} free candidate conversations. Upgrade to Solo to open more.`,

@@ -94,8 +94,8 @@ export function useChatbot() {
 
   // The platform engine's row, kept separately from `aiConfigs` (which holds
   // only the org's own keys). Its presence is what tells the picker whether the
-  // catalogue models are available at all — grandfathered orgs and servers with
-  // no platform key never get one.
+  // catalogue models are available at all — servers with no platform key, and
+  // orgs that switched the platform engine off, never get one.
   const platformAiConfig = useState<ChatbotAiConfigSummary | null>('chatbot.platformAiConfig', () => null)
 
   // Catalogue model pinned for the next turn. `null` = the platform default.

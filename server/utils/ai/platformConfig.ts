@@ -42,7 +42,10 @@ export async function getPlatformAiOverride(orgId: string): Promise<PlatformAiOv
  * Every tier may, including `grandfathered`: that tier was BYOK-only until its
  * allowances were aligned with Free (`tierUsesFreeAllowances`), which bounds what
  * it can spend. Before that it was the one tier whose members could not run AI at
- * all without bringing a key, which is exactly what most of them never did.
+ * all without bringing a key, which is exactly what most of them never did. So
+ * this now answers a server question, not a plan one — the org is accepted and
+ * ignored, and the signature stays per-org (and async) because the callers read
+ * as a per-org decision and a future exclusion would land here.
  */
 export async function canUsePlatformAi(_orgId: string): Promise<boolean> {
   return Boolean(env.OPENROUTER_API_KEY)

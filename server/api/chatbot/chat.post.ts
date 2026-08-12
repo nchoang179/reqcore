@@ -52,6 +52,7 @@ import {
   FREE_PLAN_CHATBOT_MODEL_ID,
   isChatbotCatalogueModel,
 } from '../../../shared/chatbot-models'
+import { tierUsesFreeAllowances } from '../../../shared/billing'
 
 /**
  * POST /api/chatbot/chat
@@ -190,6 +191,11 @@ export default defineEventHandler(async (event) => {
   const orgId = session.session.activeOrganizationId
   const plan = await resolveOrgPlanId(orgId)
   const freePlanRestrictionsApply = !isBillingDisabled() && plan === 'free'
+  // Wider than the restrictions above: `grandfathered` picks its own engine and
+  // model, but its platform turns are metered against the Free prompt allowance,
+  // so it must claim a slot the same way. Keyed off the same predicate the
+  // allowance check in budget.ts uses, or the two would disagree.
+  const freeAllowanceApplies = !isBillingDisabled() && tierUsesFreeAllowances(plan)
 
   const body = await readValidatedBody(event, bodySchema.parse)
 
@@ -316,7 +322,15 @@ export default defineEventHandler(async (event) => {
   // message. Free claims are serialized in reserveChatbotUsage, closing the
   // concurrency gap between the allowance check above and this insert.
   let usageRowId: string | null
-  const promptLimit = freePlanRestrictionsApply ? freeChatbotPromptLimit() : undefined
+  // BYOK turns are excluded on purpose: the org pays for that key, so only a
+  // platform-paid turn spends the allowance (see assertChatbotAllowance). Free
+  // orgs are pinned to the platform engine anyway, so this keeps their behaviour
+  // and extends the same atomic claim to `grandfathered` platform turns — whose
+  // pre-stream allowance check would otherwise be their only gate, leaving
+  // concurrent turns free to overshoot the limit.
+  const claimsFreePromptSlot = freePlanRestrictionsApply
+    || (freeAllowanceApplies && resolved.billingMode === 'platform')
+  const promptLimit = claimsFreePromptSlot ? freeChatbotPromptLimit() : undefined
   try {
     usageRowId = await reserveChatbotUsage({
       orgId,
@@ -668,7 +682,7 @@ export default defineEventHandler(async (event) => {
                 : null,
             })
           }
-          else if (!freePlanRestrictionsApply) {
+          else if (!claimsFreePromptSlot) {
             await releaseChatbotUsage(usageRowId)
           }
         }

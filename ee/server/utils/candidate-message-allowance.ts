@@ -1,6 +1,7 @@
-import { and, eq, ne, sql } from 'drizzle-orm'
+import { and, eq, gte, ne, sql } from 'drizzle-orm'
 import { candidateMessage } from '~~/server/database/schema'
 import {
+  conversationCapStartFor,
   FREE_PLAN_CANDIDATE_CONVERSATION_LIMIT,
   type BillingTier,
   tierUsesFreeAllowances,
@@ -38,12 +39,17 @@ export function candidateMessageAllowanceFromUsage(
   }
 }
 
-/** Outbound messages that occupy a Free conversation slot (failed sends release theirs). */
-function liveOutbound(orgId: string) {
+/**
+ * Outbound messages that occupy a Free conversation slot (failed sends release
+ * theirs). `since` narrows the window to messages sent at or after an instant,
+ * which is how the cap stays non-retroactive for grandfathered orgs.
+ */
+function liveOutbound(orgId: string, since?: Date | null) {
   return and(
     eq(candidateMessage.organizationId, orgId),
     eq(candidateMessage.direction, 'outbound'),
     ne(candidateMessage.status, 'failed'),
+    ...(since ? [gte(candidateMessage.createdAt, since)] : []),
   )
 }
 
@@ -51,15 +57,20 @@ function liveOutbound(orgId: string) {
  * Count the distinct conversations an org has started — i.e. that hold at least
  * one live outbound message. This is the quantity the Free conversation cap
  * meters; the number of messages within those conversations is irrelevant.
+ *
+ * `since` counts only conversations opened at or after that instant. Pass the
+ * tier's `conversationCapStartFor` so a tier the cap was extended to later is
+ * not charged for its history.
  */
 export async function countStartedConversations(
   orgId: string,
   executor: DbExecutor = db,
+  since?: Date | null,
 ): Promise<number> {
   const [{ value } = { value: '0' }] = await executor
     .select({ value: sql<string>`count(distinct ${candidateMessage.conversationId})` })
     .from(candidateMessage)
-    .where(liveOutbound(orgId))
+    .where(liveOutbound(orgId, since))
   return Number(value)
 }
 
@@ -91,7 +102,8 @@ export async function canSendIntoConversation(
 ): Promise<boolean> {
   if (!tierUsesFreeAllowances(tier)) return true
   if (await conversationHasLiveOutbound(orgId, conversationId, executor)) return true
-  return (await countStartedConversations(orgId, executor)) < FREE_PLAN_CANDIDATE_CONVERSATION_LIMIT
+  const used = await countStartedConversations(orgId, executor, conversationCapStartFor(tier))
+  return used < FREE_PLAN_CANDIDATE_CONVERSATION_LIMIT
 }
 
 /**
@@ -102,6 +114,6 @@ export async function getCandidateMessageAllowance(
   orgId: string,
   tier: BillingTier,
 ): Promise<CandidateMessageAllowance> {
-  const used = await countStartedConversations(orgId)
+  const used = await countStartedConversations(orgId, db, conversationCapStartFor(tier))
   return candidateMessageAllowanceFromUsage(tier, used)
 }

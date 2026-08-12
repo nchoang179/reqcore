@@ -80,6 +80,10 @@ export const ACTIVE_ROLE_LIMITS: Record<BillingTier, number> = {
  * boundary rather than a cost control, and applying it here would take away the
  * key and model choice `grandfathered` was originally sold on. Same reasoning
  * keeps BYOK assistant turns uncapped in `assertChatbotAllowance`.
+ *
+ * One allowance this predicate does newly restrict is candidate conversations,
+ * which are not platform AI spend. That cap is therefore not retroactive for
+ * `grandfathered` — see `GRANDFATHERED_CONVERSATION_CAP_START`.
  */
 export function tierUsesFreeAllowances(tier: BillingTier): boolean {
   return tier === 'free' || tier === 'grandfathered'
@@ -102,6 +106,31 @@ export const FREE_PLAN_ANALYSIS_LIMIT = 50
  * limit is reached. Paid plans have unlimited candidate messaging.
  */
 export const FREE_PLAN_CANDIDATE_CONVERSATION_LIMIT = 5
+
+/**
+ * When the conversation cap started applying to `grandfathered` orgs.
+ *
+ * The tier had unlimited candidate messaging until it was folded into the Free
+ * allowances, and the count is all-time — so applying it unchanged would have
+ * blocked, on deploy day, exactly the legacy orgs that had been messaging
+ * candidates all along. Their conversations opened before this instant do not
+ * consume a slot; the cap meters only what they start from here on.
+ *
+ * Free orgs are unaffected: they have always been metered all-time, so
+ * `conversationCapStartFor` returns null for them.
+ *
+ * Bump this to the actual release date if the rollout slips — a cutoff in the
+ * past silently charges legacy orgs for threads they opened before the rule.
+ */
+export const GRANDFATHERED_CONVERSATION_CAP_START = new Date('2026-08-12T00:00:00Z')
+
+/**
+ * The instant from which a tier's started conversations count against the cap,
+ * or null when the whole history counts.
+ */
+export function conversationCapStartFor(tier: BillingTier): Date | null {
+  return tier === 'grandfathered' ? GRANDFATHERED_CONVERSATION_CAP_START : null
+}
 
 /**
  * Lifetime assistant-prompt allowance for a hosted Free workspace.
