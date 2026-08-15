@@ -16,6 +16,9 @@ const state = vi.hoisted(() => ({
     isDefaultChatbot: boolean
   },
   byokConfig: null as null | { id: string, provider: string, model: string },
+  /** Whether the server has a platform OpenRouter key — the only thing
+   *  `canUsePlatformAi` weighs now that no tier is excluded from it. */
+  platformKey: true,
 }))
 
 vi.mock('../../server/utils/ai/loadConfig', () => ({
@@ -36,7 +39,7 @@ vi.mock('../../server/utils/billing/plan', () => ({
 
 vi.mock('../../server/utils/ai/platformConfig', () => ({
   PLATFORM_AI_CONFIG_ID: '__platform__',
-  canUsePlatformAi: vi.fn(async () => state.plan !== 'grandfathered'),
+  canUsePlatformAi: vi.fn(async () => state.platformKey),
   getPlatformAiOverride: vi.fn(async () => state.platformOverride),
   platformOverrideEnabled: vi.fn((row: null | { isEnabled: boolean }) => row?.isEnabled ?? true),
   resolvePlatformAiProviderConfig: vi.fn(async () => ({
@@ -81,6 +84,7 @@ describe('resolveChatbotProvider', () => {
     state.plan = 'solo'
     state.platformOverride = null
     state.byokConfig = null
+    state.platformKey = true
     vi.stubGlobal('env', {
       OPENROUTER_API_KEY: 'sk-platform-test',
       OPENROUTER_MODEL: 'openai/gpt-5.4-mini',
@@ -123,10 +127,23 @@ describe('resolveChatbotProvider', () => {
     expect(resolved.billingMode).toBe('byok')
   })
 
-  it('never spends the platform key for a grandfathered org', async () => {
-    // Their free tier is explicitly BYOK-only — a missing config must surface as
-    // the "configure a provider" error, not a silent platform-paid turn.
+  it('serves a grandfathered org from the platform key when it has no config', async () => {
+    // The tier was BYOK-only, which left the orgs that never configured a key
+    // with no assistant at all. It now resolves like any other tier; what bounds
+    // it is the Free prompt allowance in budget.ts, not this resolution order.
     state.plan = 'grandfathered'
+    const resolved = await resolveChatbotProvider('org-1')
+    expect(resolved.billingMode).toBe('platform')
+  })
+
+  it('surfaces the config error when the server has no platform key', async () => {
+    state.platformKey = false
+    await expect(resolveChatbotProvider('org-1')).rejects.toThrow('No AI config')
+  })
+
+  it('still honours a grandfathered org that switched the platform engine off', async () => {
+    state.plan = 'grandfathered'
+    state.platformOverride = { isEnabled: false, isDefaultAnalysis: false, isDefaultChatbot: true }
     await expect(resolveChatbotProvider('org-1')).rejects.toThrow('No AI config')
   })
 

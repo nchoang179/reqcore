@@ -9,12 +9,16 @@ export function useDashboard() {
     headers: useRequestHeaders(['cookie']),
   })
 
-  /** Summary counts (open jobs, candidates, applications, unreviewed) */
+  /**
+   * Summary counts. `unviewedApplications` is per signed-in user — applicants
+   * this person has never opened, not the size of the `new` stage.
+   */
   const counts = computed(() => data.value?.counts ?? {
     openJobs: 0,
     totalCandidates: 0,
     totalApplications: 0,
-    newApplications: 0,
+    unviewedApplications: 0,
+    unansweredReplies: 0,
   })
 
   /** Application count per status */
@@ -41,12 +45,19 @@ export function useDashboard() {
   /** Top 5 open jobs sorted by application count */
   const topJobs = computed(() => data.value?.topJobs ?? [])
 
+  /**
+   * Up to 5 candidate threads whose newest message is inbound — replies nobody
+   * has answered yet. `counts.unansweredReplies` is the untruncated total.
+   */
+  const unansweredReplies = computed(() => data.value?.unansweredReplies ?? [])
+
   return {
     counts,
     pipeline,
     jobsByStatus,
     recentApplications,
     topJobs,
+    unansweredReplies,
     fetchStatus,
     error,
     refresh,

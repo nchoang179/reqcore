@@ -147,6 +147,35 @@ watch(activeStatus, (newStatus) => {
 })
 
 const statusFilter = computed(() => activeStatus.value)
+
+// ── Viewed filter ─────────────────────────────────────────────────────────────
+// Server-side read receipts, per signed-in user. The dashboard's "To Review"
+// tile links here with `?viewed=unviewed`, so the count it shows and the rows
+// listed here come from the same definition.
+
+const VIEWED_OPTIONS = ['unviewed', 'viewed'] as const
+type ViewedFilter = typeof VIEWED_OPTIONS[number]
+
+const initialViewed = VIEWED_OPTIONS.includes(route.query.viewed as any)
+  ? (route.query.viewed as ViewedFilter)
+  : undefined
+const activeViewed = useState<ViewedFilter | undefined>(`app-filter-viewed${scopeSuffix}`, () => initialViewed)
+if (initialViewed !== undefined) {
+  activeViewed.value = initialViewed
+}
+
+watch(activeViewed, (next) => {
+  const query = { ...route.query }
+  if (next) {
+    query.viewed = next
+  }
+  else {
+    delete query.viewed
+  }
+  router.replace({ query })
+})
+
+const viewedFilter = computed(() => activeViewed.value)
 const propertyFilters = ref<import('~~/shared/properties').PropertyFilter[]>([])
 const jobIdFilter = computed(() => props.jobId)
 
@@ -154,11 +183,12 @@ const { applications, total, fetchStatus, error, refresh } = useApplications({
   page,
   limit: pageSize,
   status: statusFilter,
+  viewed: viewedFilter,
   propertyFilters,
   jobId: jobIdFilter,
 })
 
-watch([statusFilter, propertyFilters, pageSize], () => {
+watch([statusFilter, viewedFilter, propertyFilters, pageSize], () => {
   page.value = 1
 }, { deep: true })
 
@@ -251,11 +281,12 @@ const filteredApplications = computed(() => {
 })
 
 const hasActiveFilters = computed(() =>
-  activeStatus.value != null || activeJobId.value != null || debouncedSearch.value.length > 0 || propertyFilters.value.length > 0,
+  activeStatus.value != null || activeViewed.value != null || activeJobId.value != null || debouncedSearch.value.length > 0 || propertyFilters.value.length > 0,
 )
 
 function clearAllFilters() {
   activeStatus.value = undefined
+  activeViewed.value = undefined
   activeJobId.value = undefined
   searchInput.value = ''
   debouncedSearch.value = ''
@@ -312,6 +343,7 @@ const statusLabels: Record<Status, string> = {
 
 type ApplicationsViewSettings = {
   status?: Status
+  viewed?: ViewedFilter
   jobId?: string
   propertyFilters: import('~~/shared/properties').PropertyFilter[]
   sortKey: SortKey
@@ -321,6 +353,7 @@ type ApplicationsViewSettings = {
 
 const defaultSettings: ApplicationsViewSettings = {
   status: undefined,
+  viewed: undefined,
   jobId: undefined,
   propertyFilters: [],
   sortKey: 'created',
@@ -335,6 +368,7 @@ const isFullscreen = ref(false)
 const isWideDetail = ref(!!props.jobId)
 const currentSettings = computed<ApplicationsViewSettings>(() => ({
   status: activeStatus.value,
+  viewed: activeViewed.value,
   jobId: activeJobId.value,
   propertyFilters: [...propertyFilters.value],
   sortKey: sortKey.value,
@@ -344,6 +378,7 @@ const currentSettings = computed<ApplicationsViewSettings>(() => ({
 
 function applySettings(s: ApplicationsViewSettings) {
   activeStatus.value = s.status
+  activeViewed.value = s.viewed
   activeJobId.value = s.jobId
   propertyFilters.value = [...(s.propertyFilters ?? [])]
   sortKey.value = s.sortKey
@@ -406,7 +441,7 @@ function onUpdateView(id: string) {
 }
 
 const drawerActiveCount = computed(() =>
-  [activeStatus.value, activeJobId.value].filter(Boolean).length + propertyFilters.value.length,
+  [activeStatus.value, activeViewed.value, activeJobId.value].filter(Boolean).length + propertyFilters.value.length,
 )
 
 // ── Property value lookup helper ──────────────────────────────────────────────
@@ -541,6 +576,40 @@ async function handleApplicationDeleted() {
               @click="activeStatus = activeStatus === s ? undefined : s"
             >{{ statusLabels[s] }}</button>
           </div>
+        </div>
+
+        <!-- Viewed -->
+        <div>
+          <label class="block text-xs font-semibold uppercase tracking-wide text-surface-500 dark:text-surface-400 mb-2">Viewed</label>
+          <div class="flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              class="rounded-full px-3 py-1.5 text-xs font-medium transition-colors"
+              :class="!activeViewed
+                ? 'bg-surface-900 text-white dark:bg-surface-100 dark:text-surface-900'
+                : 'bg-surface-100 dark:bg-surface-800 text-surface-500 dark:text-surface-400 hover:bg-surface-200 dark:hover:bg-surface-700'"
+              @click="activeViewed = undefined"
+            >Any</button>
+            <button
+              type="button"
+              class="rounded-full px-3 py-1.5 text-xs font-medium transition-colors"
+              :class="activeViewed === 'unviewed'
+                ? 'bg-surface-900 text-white dark:bg-surface-100 dark:text-surface-900'
+                : 'bg-surface-100 dark:bg-surface-800 text-surface-500 dark:text-surface-400 hover:bg-surface-200 dark:hover:bg-surface-700'"
+              @click="activeViewed = activeViewed === 'unviewed' ? undefined : 'unviewed'"
+            >Not viewed by me</button>
+            <button
+              type="button"
+              class="rounded-full px-3 py-1.5 text-xs font-medium transition-colors"
+              :class="activeViewed === 'viewed'
+                ? 'bg-surface-900 text-white dark:bg-surface-100 dark:text-surface-900'
+                : 'bg-surface-100 dark:bg-surface-800 text-surface-500 dark:text-surface-400 hover:bg-surface-200 dark:hover:bg-surface-700'"
+              @click="activeViewed = activeViewed === 'viewed' ? undefined : 'viewed'"
+            >Viewed by me</button>
+          </div>
+          <p v-if="activeViewed === 'unviewed'" class="mt-2 text-xs text-surface-400 dark:text-surface-500">
+            Rejected applicants are excluded — they've already been decided on.
+          </p>
         </div>
 
         <!-- Job (global list only) -->

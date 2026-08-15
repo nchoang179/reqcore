@@ -1,5 +1,5 @@
 import { asc, eq, and, desc, inArray, notInArray, or, ilike, gte, lt, isNull, count, sql } from 'drizzle-orm'
-import { application, applicationStatusEnum, candidate, interview, job } from '../../database/schema'
+import { application, applicationStatusEnum, applicationView, candidate, interview, job } from '../../database/schema'
 import { applicationQuerySchema } from '../../utils/schemas/application'
 import { propertyFiltersArraySchema } from '../../utils/schemas/property'
 import {
@@ -81,6 +81,23 @@ export default defineEventHandler(async (event) => {
         ? inArray(application.id, interviewApplicationIds)
         : notInArray(application.id, interviewApplicationIds),
     )
+  }
+  if (query.viewed === 'unviewed') {
+    // Reuses the dashboard's definition of unviewed (rejected excluded) so the
+    // "to review" tile and the list it links to can't report different numbers.
+    conditions.push(unviewedApplicationCondition({ organizationId: orgId, userId: session.user.id }))
+  }
+  else if (query.viewed === 'viewed') {
+    conditions.push(inArray(
+      application.id,
+      db
+        .select({ applicationId: applicationView.applicationId })
+        .from(applicationView)
+        .where(and(
+          eq(applicationView.organizationId, orgId),
+          eq(applicationView.userId, session.user.id),
+        )),
+    ))
   }
 
   // ── Custom property filters ──

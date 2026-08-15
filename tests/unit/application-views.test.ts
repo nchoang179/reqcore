@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   recordApplicationView,
+  unviewedApplicationCount,
   unviewedCountsByJob,
   viewedAtByApplication,
 } from '../../server/utils/applicationViews'
@@ -152,5 +153,24 @@ describe('application read receipts', () => {
 
     expect(counts.get('job-1')).toBe(224)
     expect(counts.has('job-2')).toBe(false)
+  })
+
+  // The dashboard's "To Review" tile. It spans every job — including closed and
+  // archived ones — because an applicant nobody has opened is still waiting on
+  // you regardless of what happened to the job they applied to.
+  it('counts unviewed applicants org-wide, without scoping to a job', async () => {
+    const chain = stubQuery([])
+    const $count = vi.fn(async () => 7)
+    vi.stubGlobal('db', { ...chain, $count })
+
+    await expect(unviewedApplicationCount({
+      organizationId: 'org-1',
+      userId: 'user-1',
+    })).resolves.toBe(7)
+
+    // No jobId ever reaches the query — the only arguments are the table and the
+    // shared unviewed condition.
+    expect($count).toHaveBeenCalledTimes(1)
+    expect($count.mock.calls[0]).toHaveLength(2)
   })
 })

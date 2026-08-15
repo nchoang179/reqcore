@@ -5,7 +5,7 @@ import {
   interview,
   organization,
 } from '../database/schema'
-import { type BillingTier } from '../../shared/billing'
+import { type BillingTier, tierUsesFreeAllowances } from '../../shared/billing'
 import { canSendIntoConversation } from '../../ee/server/utils/candidate-message-allowance'
 import { sendCandidateMessageEmail } from './email'
 import { assertOutboundMessageLimit } from './candidate-message-rate-limit'
@@ -260,7 +260,7 @@ export async function sendInterviewConversationMessage(params: {
 
   const now = new Date()
   const reserved = await db.transaction(async (tx) => {
-    if (!params.bypassAllowance && params.tier === 'free') {
+    if (!params.bypassAllowance && tierUsesFreeAllowances(params.tier)) {
       // An interview request opens (or reuses) a candidate conversation. Sending
       // into an already-started conversation is unlimited; a first message only
       // goes through while the org has a free conversation slot left.

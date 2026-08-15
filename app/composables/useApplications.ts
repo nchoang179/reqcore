@@ -12,6 +12,8 @@ export function useApplications(options?: {
   jobId?: Ref<string | undefined> | string
   candidateId?: Ref<string | undefined> | string
   status?: Ref<string | undefined> | string
+  /** 'unviewed' | 'viewed' — read receipts for the signed-in user */
+  viewed?: Ref<string | undefined> | string
   propertyFilters?: Ref<PropertyFilter[] | undefined> | PropertyFilter[]
 }) {
   const { handlePreviewReadOnlyError } = usePreviewReadOnly()
@@ -24,6 +26,7 @@ export function useApplications(options?: {
       ...(toValue(options?.jobId) && { jobId: toValue(options?.jobId) }),
       ...(toValue(options?.candidateId) && { candidateId: toValue(options?.candidateId) }),
       ...(toValue(options?.status) && { status: toValue(options?.status) }),
+      ...(toValue(options?.viewed) && { viewed: toValue(options?.viewed) }),
       ...(pf && pf.length > 0 && { propertyFilters: JSON.stringify(pf) }),
     }
   })

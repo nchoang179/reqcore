@@ -6,6 +6,8 @@
  * entry. The endpoint returns whether Stripe billing is enabled, the current
  * subscription, and the org's usage against the count-based plan caps.
  */
+import { tierUsesFreeAllowances, type BillingTier } from '~~/shared/billing'
+
 export interface UsageMeter {
   used: number
   /** Hard cap on this tier, or null when there's no fixed count limit. */
@@ -13,7 +15,7 @@ export interface UsageMeter {
 }
 
 export interface BillingUsage {
-  tier: string
+  tier: BillingTier
   activeRoles: UsageMeter
   aiAnalysis: UsageMeter
   aiAssistant: UsageMeter
@@ -50,6 +52,6 @@ export function freePlanUsage(status: BillingStatus | null | undefined): Billing
   if (!status?.enabled || !status.usage) return null
   const sub = status.subscription
   const onPaidPlan = !!sub && ACTIVE_STATUSES.includes(sub.status)
-  if (onPaidPlan || status.usage.tier !== 'free') return null
+  if (onPaidPlan || !tierUsesFreeAllowances(status.usage.tier)) return null
   return status.usage
 }

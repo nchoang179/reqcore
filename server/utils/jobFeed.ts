@@ -1,4 +1,6 @@
 import { createError } from 'h3'
+import { lt } from 'drizzle-orm'
+import { feedFetch } from '../database/schema'
 import { missingPublishRequirements } from '../../shared/job-publish'
 import type { PublishRequirementInput } from '../../shared/job-publish'
 
@@ -189,6 +191,84 @@ export function checkFeedEligibility(
 /** Convenience wrapper for callers that only need a yes/no. */
 export function isFeedEligible(job: FeedJobInput, org: FeedOrgInput, now?: Date): boolean {
   return checkFeedEligibility(job, org, now) === null
+}
+
+/** How much fetch history is kept. Well past any board's polling interval. */
+export const FEED_FETCH_RETENTION_DAYS = 90
+
+/**
+ * Trims the fetch log.
+ *
+ * `/jobs.xml` is public and unauthenticated, so the row count is set by whoever
+ * decides to crawl it, not by the seven boards it exists for. Only the newest
+ * fetch per board is ever read, so old rows are pure carrying cost.
+ */
+export async function pruneFeedFetchLog(now: Date = new Date()): Promise<number> {
+  const cutoff = new Date(now)
+  cutoff.setDate(cutoff.getDate() - FEED_FETCH_RETENTION_DAYS)
+  const deleted = await db.delete(feedFetch).where(lt(feedFetch.fetchedAt, cutoff)).returning({ id: feedFetch.id })
+  return deleted.length
+}
+
+/**
+ * What we can honestly say about one board's copy of one job.
+ *
+ * Deliberately narrow. A pull-based feed can prove delivery — the board asked,
+ * this job was in the answer — and nothing beyond it. None of these states
+ * means "live on the board": ingestion happens on the board's own schedule and
+ * by its own rules, and a listing can be rejected after collection without
+ * telling us. `delivered` is the ceiling of what this evidence supports, and
+ * the UI must not phrase it as more.
+ */
+export type BoardDeliveryState =
+  /** This board fetched a feed containing the job. The strongest claim available. */
+  | 'delivered'
+  /** The job became eligible after this board's last fetch — it goes out next pull. */
+  | 'pending'
+  /** The board's most recent fetch did not include the job, though it existed by then. */
+  | 'dropped'
+  /** No fetch from this board has ever been recorded. */
+  | 'never_fetched'
+
+export interface BoardDelivery {
+  board: FeedBoard
+  label: string
+  state: BoardDeliveryState
+  /** When this board last pulled the feed, tagged or not. */
+  lastFetchedAt: Date | null
+}
+
+/**
+ * Compares a board's last pull against when the job was last put in the feed.
+ *
+ * Both timestamps come from the same clock — the feed route stamps the
+ * `feed_fetch` row and the jobs it emitted with one `now` — so equality means
+ * "was in that exact response" rather than a race the comparison has to
+ * tolerate.
+ *
+ * Only meaningful for a job that is currently feed-eligible. For one that
+ * isn't, the ineligibility reason is the answer and this would describe the
+ * history of a job that is no longer going anywhere.
+ */
+export function boardDeliveryState(input: {
+  lastFetchedAt: Date | null
+  lastIncludedInFeedAt: Date | null
+  /** When the job first became distributable — `publishedAt ?? createdAt`. */
+  eligibleSince: Date
+}): BoardDeliveryState {
+  const { lastFetchedAt, lastIncludedInFeedAt, eligibleSince } = input
+
+  if (!lastFetchedAt) return 'never_fetched'
+  if (lastIncludedInFeedAt && lastIncludedInFeedAt >= lastFetchedAt) return 'delivered'
+
+  // Published since the board last looked. Not a fault — there is simply
+  // nothing this board could have collected yet.
+  if (eligibleSince > lastFetchedAt) return 'pending'
+
+  // The job existed and qualified, the board pulled, and it wasn't in the
+  // response. Either it was ineligible at the time or something is wrong —
+  // both are worth showing rather than smoothing into "pending".
+  return 'dropped'
 }
 
 /**

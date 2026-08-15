@@ -15,7 +15,6 @@
  * key never sits in a plaintext field on the config object.
  */
 import { encrypt } from '../encryption'
-import { resolveOrgPlanId } from '../billing/plan'
 import { loadAiConfig } from './loadConfig'
 import { OPENROUTER_BASE_URL, type ProviderConfig } from './provider'
 import {
@@ -49,7 +48,11 @@ export async function resolveAnalysisProvider(
 
   if (!opts.preferId) {
     const platformOverride = await getPlatformAiOverride(orgId)
-    if (platformOverride?.isEnabled && platformOverride.isDefaultAnalysis) {
+    // The availability check comes first: an override row can hold the analysis
+    // slot on a server with no platform key, and taking this branch would 422
+    // inside `resolvePlatformAiProviderConfig` instead of falling through to the
+    // org's own config below.
+    if (platformOverride?.isEnabled && platformOverride.isDefaultAnalysis && await canUsePlatformAi(orgId)) {
       const platform = await resolvePlatformAiProviderConfig(orgId)
       return {
         ...platform,
@@ -75,9 +78,11 @@ export async function resolveAnalysisProvider(
     }
   }
   catch (err) {
-    // Grandfathered hosted orgs are free because they pay the LLM provider
-    // directly. If their BYOK config is missing, do not spend the platform key.
-    if (await resolveOrgPlanId(orgId) === 'grandfathered') throw err
+    // Only the server key's presence decides this now — no tier is excluded.
+    // Grandfathered orgs used to be, on the theory that they pay their LLM
+    // provider directly; most never configured a key, so the exclusion just
+    // denied them AI. They draw on the Free allowances instead (budget.ts).
+    if (!await canUsePlatformAi(orgId)) throw err
 
     // 2: no org config — fall back to the platform key if one is configured.
     const platformKey = env.OPENROUTER_API_KEY
@@ -122,10 +127,12 @@ export async function resolveAnalysisProvider(
  *      that never opened Settings → AI still gets a working assistant.
  *   6. Nothing available → the 422 from loadAiConfig, pointing at Settings → AI.
  *
- * Grandfathered orgs are excluded from every platform path by `canUsePlatformAi`
- * (their free tier is explicitly BYOK-only, since they pay their LLM provider
- * directly) — so for them steps 3 and 5 are unavailable and a missing BYOK
- * config surfaces as the 422 rather than silently spending the platform key.
+ * Every tier may reach the platform paths; `canUsePlatformAi` now only asks
+ * whether the server has a key at all. Grandfathered orgs used to be excluded
+ * here (their tier was sold as BYOK-only), which left the many that never
+ * configured a key with no assistant. What bounds them is the allowance they
+ * draw against in budget.ts, not this resolution order. Steps 3 and 5 are still
+ * unavailable when the org has switched the platform engine off for itself.
  *
  * `model` is the composer's model picker and applies to the platform paths only.
  * A BYOK config carries its own model id — the org's key may not even be able to

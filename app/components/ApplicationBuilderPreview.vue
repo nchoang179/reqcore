@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Briefcase, MapPin, Monitor, Smartphone } from 'lucide-vue-next'
+import { Banknote, Briefcase, MapPin, Monitor, Smartphone } from 'lucide-vue-next'
 
 type Question = {
   id: string
@@ -24,6 +24,11 @@ type JobDetails = {
   type?: string
   experienceLevel?: string
   remoteStatus?: string
+  salaryMin?: number | null
+  salaryMax?: number | null
+  salaryCurrency?: string | null
+  salaryUnit?: string | null
+  salaryNegotiable?: boolean
 }
 
 const props = defineProps<{
@@ -70,6 +75,47 @@ const previewJob = computed(() => ({
   questions: props.applicationForm.questions,
 }))
 
+const unitSuffixes: Record<string, string> = {
+  YEAR: '/yr',
+  MONTH: '/mo',
+  HOUR: '/hr',
+}
+
+/**
+ * The pay chip as a candidate sees it, so what the recruiter types on step 1
+ * has somewhere to land in the preview beside it. Deliberately forgiving: this
+ * renders a half-filled range while it is still being typed, where the public
+ * listing only ever sees a finished one.
+ */
+const salaryLabel = computed(() => {
+  const details = props.jobDetails
+  if (!details) return null
+  if (details.salaryNegotiable) return 'Negotiable'
+
+  const { salaryMin, salaryMax, salaryCurrency, salaryUnit } = details
+  if (salaryMin == null && salaryMax == null) return null
+
+  // The code is free text on the way in, so an unfinished or invented one
+  // ("NO", "ZZZ") reaches this mid-keystroke. `Intl` throws on those — falling
+  // back to a plain number keeps the preview rendering while it is typed.
+  const format = (value: number) => {
+    if (salaryCurrency) {
+      try {
+        return new Intl.NumberFormat(undefined, { style: 'currency', currency: salaryCurrency, maximumFractionDigits: 0 }).format(value)
+      } catch { /* not a currency code yet */ }
+    }
+    return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value)
+  }
+
+  const suffix = salaryUnit ? unitSuffixes[salaryUnit] ?? '' : ''
+  const range = salaryMin != null && salaryMax != null
+    ? `${format(salaryMin)} – ${format(salaryMax)}`
+    : salaryMin != null
+      ? `From ${format(salaryMin)}`
+      : `Up to ${format(salaryMax!)}`
+  return `${range}${suffix}`
+})
+
 const metadata = computed(() => {
   const details = props.jobDetails
   if (!details) return []
@@ -79,6 +125,7 @@ const metadata = computed(() => {
     details.location ? { label: details.location, icon: MapPin } : null,
     details.remoteStatus ? { label: workplaceLabels[details.remoteStatus] ?? details.remoteStatus, icon: MapPin } : null,
     details.experienceLevel ? { label: experienceLabels[details.experienceLevel] ?? details.experienceLevel, icon: Briefcase } : null,
+    salaryLabel.value ? { label: salaryLabel.value, icon: Banknote } : null,
   ].filter((item): item is { label: string; icon: typeof Briefcase } => item !== null)
 })
 </script>

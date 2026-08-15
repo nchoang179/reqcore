@@ -1,5 +1,5 @@
-import { and, eq, exists, desc, sql } from 'drizzle-orm'
-import { job, orgSettings, organization, member, user } from '../database/schema'
+import { and, eq, exists, desc, inArray, sql } from 'drizzle-orm'
+import { job, orgSettings, organization, member, user, feedFetch } from '../database/schema'
 import { markdownToFeedHtml } from '../../shared/job-description'
 import {
   checkFeedEligibility,
@@ -77,6 +77,7 @@ function formatSalary(row: {
 }
 
 export default defineEventHandler(async (event) => {
+  const startedAt = Date.now()
   const origin = getRequestURL(event).origin
   const boardParam = getQuery(event).board
   const board: FeedBoard | null
@@ -149,6 +150,8 @@ export default defineEventHandler(async (event) => {
 
   const now = new Date()
   const items: string[] = []
+  /** Stamped onto the emitted jobs below, so delivery is provable per job. */
+  const includedIds: string[] = []
 
   for (const row of rows) {
     const ineligible = checkFeedEligibility(row, {
@@ -156,6 +159,7 @@ export default defineEventHandler(async (event) => {
       ownerEmailVerified: Boolean(row.ownerVerified),
     }, now)
     if (ineligible) continue
+    includedIds.push(row.id)
 
     const postedAt = row.publishedAt ?? row.createdAt
     const url = new URL(`${origin}/jobs/${row.slug}`)
@@ -203,10 +207,39 @@ export default defineEventHandler(async (event) => {
       + items.join('')
       + '</source>\n'
 
+  // Record the delivery. Wrapped because a feed that fails to serve is a real
+  // outage for every customer, while a missing log line is an inconvenience —
+  // bookkeeping must never be able to take syndication down.
+  try {
+    await db.insert(feedFetch).values({
+      board,
+      jobCount: includedIds.length,
+      userAgent: getRequestHeader(event, 'user-agent')?.slice(0, 512) ?? null,
+      ipAddress: getRequestIP(event, { xForwardedFor: true }) ?? null,
+      durationMs: Date.now() - startedAt,
+      fetchedAt: now,
+    })
+
+    // Same `now` as the row above, so "was this job in that pull?" is an exact
+    // comparison rather than one that has to allow for drift between two clocks.
+    if (includedIds.length) {
+      await db
+        .update(job)
+        .set({ lastIncludedInFeedAt: now })
+        .where(inArray(job.id, includedIds))
+    }
+  } catch (err) {
+    console.error('[jobs.xml] failed to record feed fetch', err)
+  }
+
   setHeader(event, 'Content-Type', 'application/xml; charset=utf-8')
-  // Boards poll every few hours; an hour of edge cache costs nothing and keeps
-  // a crawler burst off the database. Mirrors sitemap.xml.
-  setHeader(event, 'Cache-Control', 'public, max-age=0, s-maxage=3600, stale-while-revalidate=86400')
+  // No shared cache. An edge hit never reaches origin, so an hour of s-maxage
+  // would silently blank the delivery log for the boards that poll fastest —
+  // and the log is the only evidence syndication produces. At roughly one pull
+  // per board per few hours the origin cost is nothing, which is exactly why
+  // the cache was not buying anything either. sitemap.xml still caches; it has
+  // no receipt to keep.
+  setHeader(event, 'Cache-Control', 'public, max-age=0, s-maxage=0, must-revalidate')
   // No X-Robots-Tag here: the catch-all rule in nuxt.config.ts already serves
   // `noindex, nofollow`, which is right for a feed. Aggregators fetch this URL
   // directly from their publisher config, they don't discover it by crawling.

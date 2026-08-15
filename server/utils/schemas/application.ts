@@ -30,6 +30,8 @@ export const applicationQuerySchema = z.object({
   search: z.string().trim().max(200).optional(),
   score: z.enum(['high', 'medium', 'low', 'none']).optional(),
   interview: z.enum(['has-interview', 'no-interview']).optional(),
+  /** Read receipts for the requesting user — see server/utils/applicationViews.ts */
+  viewed: z.enum(['viewed', 'unviewed']).optional(),
   sort: z.enum(['date-desc', 'date-asc', 'name-asc', 'name-desc', 'score-desc', 'score-asc', 'updated-desc']).default('date-desc'),
   /** JSON-encoded array of { propertyDefinitionId, op, value } filters */
   propertyFilters: z.string().optional(),

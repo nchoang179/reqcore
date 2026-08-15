@@ -21,6 +21,10 @@ import {
   validateCandidateMessageAttachments,
 } from '../../ee/server/utils/candidate-message-attachments'
 import { CANDIDATE_MESSAGE_MAX_ATTACHMENTS } from '../../shared/candidate-messaging'
+import {
+  conversationCapStartFor,
+  GRANDFATHERED_CONVERSATION_CAP_START,
+} from '../../shared/billing'
 
 const token = '0123456789abcdef0123456789abcdef'
 
@@ -48,6 +52,22 @@ describe('candidate message allowance', () => {
       remaining: null,
       canSend: true,
     })
+  })
+
+  it('applies the same cap to grandfathered orgs', () => {
+    expect(candidateMessageAllowanceFromUsage('grandfathered', 5)).toMatchObject({
+      limit: 5,
+      remaining: 0,
+      canSend: false,
+    })
+  })
+
+  it('counts grandfathered conversations only from the cutoff, not all-time', () => {
+    // The tier had unlimited messaging before the cap was extended to it, so an
+    // all-time count would have blocked its long-standing orgs on deploy day.
+    expect(conversationCapStartFor('grandfathered')).toEqual(GRANDFATHERED_CONVERSATION_CAP_START)
+    expect(conversationCapStartFor('free')).toBeNull()
+    expect(conversationCapStartFor('solo')).toBeNull()
   })
 })
 

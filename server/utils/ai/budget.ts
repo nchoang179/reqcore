@@ -38,8 +38,10 @@ import { getModelPrice, microsToUsd } from './pricing'
 import { chatbotCreditAllowance } from './credits'
 import { isBillingDisabled, resolveOrgPlanId } from '../billing/plan'
 import {
+  type BillingTier,
   FREE_PLAN_ANALYSIS_LIMIT,
   FREE_PLAN_CHATBOT_PROMPT_LIMIT,
+  tierUsesFreeAllowances,
 } from '../../../shared/billing'
 
 /**
@@ -335,7 +337,7 @@ async function assertFreeChatbotPrompts(orgId: string): Promise<void> {
 export async function assertChatbotAllowance(
   orgId: string,
   billingMode: 'platform' | 'byok',
-  resolvedPlan?: string,
+  resolvedPlan?: BillingTier,
 ): Promise<void> {
   const plan = resolvedPlan ?? await resolveOrgPlanId(orgId)
   // The credit allowance is a SaaS product boundary. A billing-disabled
@@ -347,7 +349,7 @@ export async function assertChatbotAllowance(
   if (billingMode === 'platform') {
     const [, daySpend] = await Promise.all([
       allowanceApplies
-        ? (plan === 'free' ? assertFreeChatbotPrompts(orgId) : assertChatbotCredits(orgId, plan))
+        ? (tierUsesFreeAllowances(plan) ? assertFreeChatbotPrompts(orgId) : assertChatbotCredits(orgId, plan))
         : Promise.resolve(),
       sumPlatformSpendMicros(startOfUtcDay()),
     ])
@@ -355,6 +357,10 @@ export async function assertChatbotAllowance(
     return
   }
 
+  // Free only, deliberately not `tierUsesFreeAllowances`: this caps a BYOK turn,
+  // which the org pays for itself. Free is capped anyway because the grant is a
+  // product boundary, but BYOK is the bargain `grandfathered` was sold on — those
+  // orgs keep it uncapped, and metering a key we do not pay for buys nothing.
   if (allowanceApplies && plan === 'free') {
     await assertFreeChatbotPrompts(orgId)
   }
@@ -376,7 +382,7 @@ export async function assertChatbotAllowance(
 export async function assertPlatformBudget(orgId: string): Promise<void> {
   const plan = await resolveOrgPlanId(orgId)
 
-  if (plan === 'free') {
+  if (tierUsesFreeAllowances(plan)) {
     // Count-based gate: one free AI shortlist per account, then upgrade.
     const [runs, daySpend] = await Promise.all([
       countPlatformRuns(orgId),

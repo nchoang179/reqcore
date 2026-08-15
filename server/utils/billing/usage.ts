@@ -14,7 +14,7 @@
  * is count-based. Paid tiers still report only a credit percentage, keeping raw
  * balances and the credit-to-cost rate private.
  */
-import { and, eq, ne, sql } from 'drizzle-orm'
+import { and, eq, gte, ne, sql } from 'drizzle-orm'
 import { analysisRun, candidateMessage, job } from '../../database/schema'
 import { resolveOrgPlanId } from './plan'
 import {
@@ -25,7 +25,9 @@ import {
 import { creditPercentUsed } from '../ai/credits'
 import {
   activeRoleLimitForTier,
+  conversationCapStartFor,
   FREE_PLAN_CANDIDATE_CONVERSATION_LIMIT,
+  tierUsesFreeAllowances,
   type BillingTier,
 } from '../../../shared/billing'
 
@@ -74,7 +76,7 @@ async function countPlatformRuns(orgId: string): Promise<number> {
  * (countStartedConversations); the number of messages within a thread is
  * irrelevant, only whether a slot is occupied.
  */
-async function countStartedConversations(orgId: string): Promise<number> {
+async function countStartedConversations(orgId: string, since: Date | null): Promise<number> {
   const [row] = await db
     .select({ total: sql<string>`count(distinct ${candidateMessage.conversationId})` })
     .from(candidateMessage)
@@ -82,6 +84,9 @@ async function countStartedConversations(orgId: string): Promise<number> {
       eq(candidateMessage.organizationId, orgId),
       eq(candidateMessage.direction, 'outbound'),
       ne(candidateMessage.status, 'failed'),
+      // Same window the gate enforces, so the meter can't read 9/5 on a tier the
+      // cap only started applying to at GRANDFATHERED_CONVERSATION_CAP_START.
+      ...(since ? [gte(candidateMessage.createdAt, since)] : []),
     ))
   return Number(row?.total ?? 0)
 }
@@ -99,10 +104,10 @@ export async function getOrgUsage(orgId: string): Promise<OrgUsage> {
   const [openJobs, aiRuns, assistantUsage, conversations] = await Promise.all([
     countOpenJobs(orgId),
     countPlatformRuns(orgId),
-    tier === 'free'
+    tierUsesFreeAllowances(tier)
       ? getFreeChatbotPromptUsage(orgId)
       : getChatbotCreditUsage(orgId, tier),
-    countStartedConversations(orgId),
+    countStartedConversations(orgId, conversationCapStartFor(tier)),
   ])
 
   const roleLimit = activeRoleLimitForTier(tier)
@@ -115,9 +120,9 @@ export async function getOrgUsage(orgId: string): Promise<OrgUsage> {
     },
     aiAnalysis: {
       used: aiRuns,
-      limit: tier === 'free' ? freeRunLimit() : null,
+      limit: tierUsesFreeAllowances(tier) ? freeRunLimit() : null,
     },
-    aiAssistant: tier === 'free'
+    aiAssistant: tierUsesFreeAllowances(tier)
       ? { used: assistantUsage.used, limit: assistantUsage.allowance }
       : {
           // Percentage of a paid credit allowance, never its raw balance.
@@ -126,7 +131,7 @@ export async function getOrgUsage(orgId: string): Promise<OrgUsage> {
         },
     candidateConversations: {
       used: conversations,
-      limit: tier === 'free' ? FREE_PLAN_CANDIDATE_CONVERSATION_LIMIT : null,
+      limit: tierUsesFreeAllowances(tier) ? FREE_PLAN_CANDIDATE_CONVERSATION_LIMIT : null,
     },
   }
 }

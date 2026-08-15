@@ -2,8 +2,10 @@
 FROM node:22.22-alpine AS builder
 WORKDIR /app
 
-# Install dependencies first (layer-cached unless package.json changes)
-COPY package*.json ./
+# Install dependencies first (layer-cached unless package.json changes).
+# .npmrc comes along because it carries the peer-resolution mode the lockfile
+# was generated under — without it `npm ci` here rejects the lock outright.
+COPY package*.json .npmrc ./
 RUN npm ci
 
 # Copy source and build

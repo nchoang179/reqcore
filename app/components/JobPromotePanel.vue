@@ -89,6 +89,59 @@ async function setDistributeToBoards(next: boolean) {
 }
 
 // ─────────────────────────────────────────────
+// Per-board delivery
+// ─────────────────────────────────────────────
+
+/**
+ * How each board's row reads.
+ *
+ * Every label is a statement about the feed, never about the board's site —
+ * "collected" is the strongest thing a pull-based feed can evidence, and a
+ * board decides on its own schedule what to do with what it collected. Saying
+ * "live on Adzuna" here would be the same unbacked claim this panel used to
+ * make for all seven at once.
+ */
+const DELIVERY_LABELS: Record<string, { text: string; dot: string; tone: string }> = {
+  delivered: {
+    text: 'Collected',
+    dot: 'bg-success-500',
+    tone: 'text-surface-600 dark:text-surface-400',
+  },
+  pending: {
+    text: 'Next pull',
+    dot: 'bg-brand-500',
+    tone: 'text-surface-500 dark:text-surface-400',
+  },
+  dropped: {
+    text: 'Not in last pull',
+    dot: 'bg-warning-500',
+    tone: 'text-warning-700 dark:text-warning-400',
+  },
+  never_fetched: {
+    text: 'No pull recorded',
+    dot: 'bg-surface-300 dark:bg-surface-600',
+    tone: 'text-surface-400 dark:text-surface-500',
+  },
+}
+
+const deliveredCount = computed(() =>
+  data.value?.feed.deliveries.filter(d => d.state === 'delivered').length ?? 0,
+)
+
+/** Coarse on purpose: the exact minute a crawler called is noise to a recruiter. */
+function since(value: string | Date | null): string | null {
+  if (!value) return null
+  const then = new Date(value).getTime()
+  const minutes = Math.floor((Date.now() - then) / 60_000)
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  return days === 1 ? 'yesterday' : `${days}d ago`
+}
+
+// ─────────────────────────────────────────────
 // Clipboard
 // ─────────────────────────────────────────────
 
@@ -446,7 +499,10 @@ onMounted(() => {
                     : 'External job boards — off' }}
               </p>
               <p v-if="data.feed.eligible" class="mt-0.5 text-xs text-surface-500 dark:text-surface-400">
-                Sent to {{ data.feed.boards.map(b => b.label).join(', ') }}. Boards refresh every few hours.
+                {{ deliveredCount
+                  ? `Collected by ${deliveredCount} of ${data.feed.deliveries.length} boards.`
+                  : 'Waiting for the boards to collect it.' }}
+                Each board pulls the feed on its own schedule.
               </p>
               <p
                 v-else
@@ -467,6 +523,30 @@ onMounted(() => {
               >
                 Fix in job settings
               </NuxtLink>
+
+              <!-- One row per board. Present only while the job is eligible:
+                   when it isn't, the reason above is the whole answer and
+                   delivery history would read as a claim about a role that is
+                   no longer going anywhere. -->
+              <ul
+                v-if="data.feed.eligible && data.feed.deliveries.length"
+                class="mt-3 space-y-1.5 border-l border-surface-100 dark:border-surface-800 pl-3"
+              >
+                <li
+                  v-for="d in data.feed.deliveries"
+                  :key="d.board"
+                  class="flex items-center gap-2 text-xs"
+                >
+                  <span class="size-1.5 shrink-0 rounded-full" :class="DELIVERY_LABELS[d.state]?.dot" />
+                  <span class="min-w-0 flex-1 truncate text-surface-600 dark:text-surface-400">{{ d.label }}</span>
+                  <span class="shrink-0 tabular-nums" :class="DELIVERY_LABELS[d.state]?.tone">
+                    {{ DELIVERY_LABELS[d.state]?.text }}
+                    <template v-if="d.state === 'delivered' && since(d.lastFetchedAt)">
+                      · {{ since(d.lastFetchedAt) }}
+                    </template>
+                  </span>
+                </li>
+              </ul>
             </div>
 
             <button
