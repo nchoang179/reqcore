@@ -56,19 +56,6 @@ export const SURVEY_QUESTIONS = [
     ],
   },
   {
-    id: 'discovery_source',
-    title: 'How did you hear about Reqcore?',
-    subtitle: 'Helps us know what to keep doing.',
-    options: [
-      { value: 'search', label: 'Google / search' },
-      { value: 'ai_assistant', label: 'ChatGPT / AI assistant' },
-      { value: 'reddit', label: 'Reddit' },
-      { value: 'linkedin', label: 'LinkedIn' },
-      { value: 'referral', label: 'A friend or colleague' },
-      { value: 'other', label: 'Somewhere else' },
-    ],
-  },
-  {
     id: 'current_hiring_process',
     title: 'How do you manage hiring today?',
     subtitle: 'This helps us understand what you are moving from.',
