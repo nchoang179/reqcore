@@ -1,6 +1,6 @@
 conca<script setup lang="ts">
 import {
-  Save, Trash2, ArrowLeft, ExternalLink, Link2, ClipboardCopy, Globe2,
+  Save, Trash2, Globe2,
 } from 'lucide-vue-next'
 import { z } from 'zod'
 import type { LocationSelection } from '~/components/LocationCombobox.vue'
@@ -208,27 +208,6 @@ async function handleSave() {
   }
 }
 
-// ─────────────────────────────────────────────
-// Application link
-// ─────────────────────────────────────────────
-
-const requestUrl = useRequestURL()
-const applicationUrl = computed(() => {
-  const base = `${requestUrl.protocol}//${requestUrl.host}`
-  return `${base}/jobs/${job.value?.slug ?? jobId}/apply`
-})
-
-const linkCopied = ref(false)
-
-async function copyApplicationLink() {
-  try {
-    await navigator.clipboard.writeText(applicationUrl.value)
-    linkCopied.value = true
-    setTimeout(() => { linkCopied.value = false }, 2000)
-  } catch {
-    toast.info(applicationUrl.value)
-  }
-}
 
 // ─────────────────────────────────────────────
 // Delete
@@ -639,35 +618,6 @@ function onSalaryMaxChange(e: Event) {
               </button>
             </div>
             <p class="mt-1.5 text-xs text-surface-400 dark:text-surface-500">Leave blank if there is no fixed expiry date.</p>
-          </div>
-        </section>
-
-        <!-- ═══════════════════════════════════════ -->
-        <!-- SECTION: Application Link                -->
-        <!-- ═══════════════════════════════════════ -->
-        <section v-if="job.status === 'open'" class="rounded-xl border border-brand-200 dark:border-brand-800 bg-brand-50/50 dark:bg-brand-950/30 p-6">
-          <div class="flex items-center gap-2 mb-2">
-            <Link2 class="size-4 text-brand-600 dark:text-brand-400" />
-            <h2 class="text-base font-semibold text-brand-700 dark:text-brand-300">Application Link</h2>
-          </div>
-          <p class="text-xs text-surface-600 dark:text-surface-400 mb-3">
-            Share this link with candidates so they can apply to this position.
-          </p>
-          <div class="flex items-center gap-2">
-            <input
-              type="text"
-              readonly
-              :value="applicationUrl"
-              class="flex-1 rounded-lg border border-brand-200 dark:border-brand-800 bg-white dark:bg-surface-900 px-3 py-1.5 text-sm text-surface-700 dark:text-surface-300 select-all"
-            />
-            <button
-              type="button"
-              class="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 transition-colors"
-              @click="copyApplicationLink"
-            >
-              <ClipboardCopy class="size-3.5" />
-              {{ linkCopied ? 'Copied!' : 'Copy' }}
-            </button>
           </div>
         </section>
 

@@ -27,7 +27,6 @@ import { z } from 'zod'
 import type { LocationSelection } from '~/components/LocationCombobox.vue'
 import { formatJobLocation, isValidPostalCode, normalizePostalCode, POSTAL_CODE_MAX_LENGTH } from '~~/shared/job-location'
 import { descriptionLength, missingPublishRequirements, MIN_DESCRIPTION_CHARS } from '~~/shared/job-publish'
-import { slugifyJobBase } from '~~/shared/job-slug'
 import {
   SAMPLE_JOB_FORM,
   SAMPLE_JOB_QUESTIONS,
@@ -423,7 +422,6 @@ const isSubmitting = ref(false)
 /** Covers the gap between "job created" and the shortlist being ready to show. */
 const isPopulatingSample = ref(false)
 const errors = ref<Record<string, string>>({})
-const linkCopied = ref(false)
 
 const formSchema = z.object({
   title: z.string().trim().min(1, 'Title is required').max(200, 'Title must be 200 characters or less'),
@@ -696,7 +694,6 @@ function resetFormState() {
   isPublished.value = false
   createdJobId.value = ''
   createdJobSlug.value = ''
-  finalApplicationLink.value = ''
   errors.value = {}
 }
 
@@ -717,8 +714,6 @@ const publishChoice = ref<'publish' | 'draft'>('publish')
 const isPublished = ref(false)
 const createdJobSlug = ref('')
 const createdJobId = ref('')
-const finalApplicationLink = ref('')
-const linkCopiedFinal = ref(false)
 
 function validateStep1(): boolean {
   const result = formSchema.safeParse(form.value)
@@ -797,38 +792,6 @@ watch(currentStep, async () => {
   wizardEditor.value?.scrollTo({ top: 0, behavior: 'auto' })
 })
 
-const requestUrl = useRequestURL()
-// Preview only — the wizard never sends a slug, so the server derives the real
-// one from the title on create. Shares `slugifyJobBase` with it so what is shown
-// here is what gets minted; the suffix is drawn server-side, hence the xs.
-const applicationLink = computed(() => {
-  const base = `${requestUrl.protocol}//${requestUrl.host}`
-  const slugBase = form.value.title.trim() ? slugifyJobBase(form.value.title) : 'new-job'
-  return `${base}/jobs/${slugBase}-xxxxxxxx/apply`
-})
-
-async function copyApplicationLink() {
-  try {
-    await navigator.clipboard.writeText(applicationLink.value)
-    linkCopied.value = true
-    setTimeout(() => {
-      linkCopied.value = false
-    }, 2000)
-  } catch {
-    // ignore clipboard issues silently
-  }
-}
-
-// ─────────────────────────────────────────────
-// Career page integration (Step 4)
-// A published role is automatically listed on the org's branded career page.
-// Surface that page as the primary distribution destination.
-// ─────────────────────────────────────────────
-// The career page link itself is rendered by JobPromotePanel; this flag only
-// drives the upgrade nudge shown to orgs whose plan doesn't include it.
-const { hasFeature: hasPlanFeature } = usePlanFeature()
-const canUseCareerPage = computed(() => hasPlanFeature('careerPage'))
-
 async function handleSubmit(mode: 'publish' | 'draft' = publishChoice.value) {
   if (isSubmitting.value) return
 
@@ -885,10 +848,7 @@ async function handleSubmit(mode: 'publish' | 'draft' = publishChoice.value) {
     track('job_created')
 
     if (mode === 'publish' && created?.id) {
-      // Build the real application link
-      const base = `${requestUrl.protocol}//${requestUrl.host}`
       const slug = created.slug || created.id
-      finalApplicationLink.value = `${base}/jobs/${slug}/apply`
       createdJobSlug.value = slug
       createdJobId.value = created.id
 
@@ -919,15 +879,6 @@ async function handleSubmit(mode: 'publish' | 'draft' = publishChoice.value) {
           isPopulatingSample.value = false
           clearFormStorage()
         }
-      }
-
-      // Auto-copy to clipboard
-      try {
-        await navigator.clipboard.writeText(finalApplicationLink.value)
-        linkCopiedFinal.value = true
-        setTimeout(() => { linkCopiedFinal.value = false }, 3000)
-      } catch {
-        // Clipboard may not be available
       }
 
       isPublished.value = true
@@ -1078,7 +1029,7 @@ const typeOptions = [
             <p class="font-semibold text-surface-900 dark:text-surface-100">You're creating a test job</p>
             <p class="mt-1 leading-relaxed text-surface-600 dark:text-surface-300">
               Every step is filled in with an example role — change anything you like, or just keep clicking through.
-              It stays inside your workspace: never on the public job board, your career page, or any job board.
+              It stays inside your workspace: never shared externally.
               When you publish, sample applicants land in it so you can see the ranking.
             </p>
           </div>
@@ -1706,38 +1657,6 @@ const typeOptions = [
                       <strong>{{ form.title }}</strong> is now accepting applications.
                     </p>
                   </div>
-                  <NuxtLink
-                    :to="finalApplicationLink"
-                    target="_blank"
-                    class="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-brand-700 dark:text-brand-300 bg-brand-100 dark:bg-brand-900/50 rounded-lg hover:bg-brand-200 dark:hover:bg-brand-800 transition-colors shrink-0"
-                  >
-                    <ExternalLink class="size-3.5" />
-                    Preview
-                  </NuxtLink>
-                </div>
-
-                <!-- Career page upgrade nudge (free orgs) -->
-                <div
-                  v-if="!canUseCareerPage"
-                  class="flex items-start gap-3 rounded-xl border border-brand-200 dark:border-brand-900/60 bg-brand-50/60 dark:bg-brand-950/20 px-5 py-4"
-                >
-                  <div class="flex size-8 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-brand-500 to-violet-600 text-white">
-                    <Globe2 class="size-4" />
-                  </div>
-                  <div class="min-w-0 flex-1">
-                    <p class="text-sm font-semibold text-surface-900 dark:text-surface-100">
-                      Put this role on a branded career page
-                    </p>
-                    <p class="mt-0.5 text-xs text-surface-500 dark:text-surface-400">
-                      A public page for all your open roles — available on the Solo plan and above.
-                    </p>
-                  </div>
-                  <NuxtLink
-                    :to="$localePath('/dashboard/settings/career-page')"
-                    class="inline-flex shrink-0 items-center gap-1 self-center rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-brand-700 no-underline"
-                  >
-                    Learn more
-                  </NuxtLink>
                 </div>
 
                 <!-- Distribution hub. Shared with the Promote tab so the whole
@@ -1818,7 +1737,7 @@ const typeOptions = [
                     <div>
                       <span class="block text-sm font-semibold text-surface-900 dark:text-surface-100">Publish now</span>
                       <span class="text-xs text-surface-500 dark:text-surface-400 mt-1 block leading-relaxed">
-                        Your job goes live immediately. The application link will be copied to your clipboard so you can share it right away.
+                        Your job goes live immediately. You can review applicants in the pipeline right away.
                       </span>
                     </div>
                   </button>
@@ -1870,8 +1789,7 @@ const typeOptions = [
                     </span>
                     <p class="mt-1 text-xs leading-relaxed text-surface-500 dark:text-surface-400">
                       Free syndication to Jooble, Adzuna, Careerjet, Talent.com and others.
-                      Turn it off for a confidential or internal-only search — the role still
-                      gets its application link and its place on your career page.
+                      Turn it off for a confidential or internal-only search.
                     </p>
                   </div>
                 </label>

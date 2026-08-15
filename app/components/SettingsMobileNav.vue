@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import {
-  Building2, Users, UserCircle, ChevronLeft, Plug, Brain, ShieldCheck, Globe, Globe2, CreditCard, Bell,
+  Building2, Users, UserCircle, ChevronLeft, Plug, Brain, ShieldCheck, Globe, CreditCard, Bell,
 } from 'lucide-vue-next'
 
 const route = useRoute()
@@ -23,12 +23,6 @@ const settingsNav = [
     label: 'Notifications',
     to: '/dashboard/settings/notifications',
     icon: Bell,
-    exact: true,
-  },
-  {
-    label: 'Career Page',
-    to: '/dashboard/settings/career-page',
-    icon: Globe2,
     exact: true,
   },
   {
