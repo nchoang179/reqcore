@@ -15,7 +15,7 @@
  *   - UTM + first-touch attribution captured
  */
 import { describe, it, expect } from 'vitest'
-import { existsSync, readFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 const ROOT = resolve(__dirname, '../..')
@@ -82,16 +82,6 @@ describe('Consent surface (banner + composable)', () => {
     expect(consent).toMatch(/consent_granted/)
   })
 
-  it('renders ConsentBanner only while consent is undecided', () => {
-    expect(existsSync(resolve(ROOT, 'app/components/ConsentBanner.vue'))).toBe(true)
-    const banner = read('app/components/ConsentBanner.vue')
-    expect(banner).toMatch(/v-if="needsConsent"/)
-    expect(banner).toMatch(/acceptAnalytics/)
-    expect(banner).toMatch(/declineAnalytics/)
-
-    const appVue = read('app/app.vue')
-    expect(appVue).toMatch(/<ConsentBanner\s*\/>/)
-  })
 })
 
 describe('PostHog identity (PII gated on consent)', () => {

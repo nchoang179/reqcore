@@ -1,0 +1,412 @@
+{
+  "baseUrl": "http://localhost:3000",
+  "capturedAt": "2026-08-15T05:38:37.003Z",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "credentials": "demo@reqcore.com / demo1234",
+  "results": [
+    {
+      "name": "00-home",
+      "route": "/",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/00-home.png",
+      "ok": true
+    },
+    {
+      "name": "01-pricing",
+      "route": "/pricing",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/01-pricing.png",
+      "ok": true
+    },
+    {
+      "name": "02-jobs-board",
+      "route": "/jobs",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/02-jobs-board.png",
+      "ok": true
+    },
+    {
+      "name": "03-job-detail",
+      "route": "/jobs/product-designer-104b3186",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/03-job-detail.png",
+      "ok": true
+    },
+    {
+      "name": "04-job-apply",
+      "route": "/jobs/product-designer-104b3186/apply",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/04-job-apply.png",
+      "ok": true
+    },
+    {
+      "name": "05-job-confirmation",
+      "route": "/jobs/product-designer-104b3186/confirmation",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/05-job-confirmation.png",
+      "ok": true
+    },
+    {
+      "name": "06-career-page",
+      "route": "/career/reqcore-demo",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/06-career-page.png",
+      "ok": true
+    },
+    {
+      "name": "07-auth-sign-in",
+      "route": "/auth/sign-in",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/07-auth-sign-in.png",
+      "ok": true
+    },
+    {
+      "name": "08-auth-sign-up",
+      "route": "/auth/sign-up",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/08-auth-sign-up.png",
+      "ok": true
+    },
+    {
+      "name": "09-auth-forgot-password",
+      "route": "/auth/forgot-password",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/09-auth-forgot-password.png",
+      "ok": true
+    },
+    {
+      "name": "10-auth-reset-password",
+      "route": "/auth/reset-password",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/10-auth-reset-password.png",
+      "ok": true
+    },
+    {
+      "name": "11-auth-fresh-signup",
+      "route": "/auth/fresh-signup",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/11-auth-fresh-signup.png",
+      "ok": true
+    },
+    {
+      "name": "12-onboarding-welcome",
+      "route": "/onboarding/welcome",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/12-onboarding-welcome.png",
+      "ok": true
+    },
+    {
+      "name": "13-onboarding-create-org",
+      "route": "/onboarding/create-org",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/13-onboarding-create-org.png",
+      "ok": true
+    },
+    {
+      "name": "14-interview-respond",
+      "route": "/interview/respond",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/14-interview-respond.png",
+      "ok": true
+    },
+    {
+      "name": "20-dashboard",
+      "route": "/dashboard",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/20-dashboard.png",
+      "ok": true
+    },
+    {
+      "name": "21-dashboard-jobs",
+      "route": "/dashboard/jobs",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/21-dashboard-jobs.png",
+      "ok": true
+    },
+    {
+      "name": "22-dashboard-jobs-new",
+      "route": "/dashboard/jobs/new",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/22-dashboard-jobs-new.png",
+      "ok": true
+    },
+    {
+      "name": "23-dashboard-jobs-preview",
+      "route": "/dashboard/jobs/preview",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/23-dashboard-jobs-preview.png",
+      "ok": true
+    },
+    {
+      "name": "24-dashboard-job-detail",
+      "route": "/dashboard/jobs/104b3186-23da-4c44-8519-0ceaba280b38",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/24-dashboard-job-detail.png",
+      "ok": true
+    },
+    {
+      "name": "25-dashboard-job-settings",
+      "route": "/dashboard/jobs/104b3186-23da-4c44-8519-0ceaba280b38/settings",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/25-dashboard-job-settings.png",
+      "ok": true
+    },
+    {
+      "name": "26-dashboard-job-application-form",
+      "route": "/dashboard/jobs/104b3186-23da-4c44-8519-0ceaba280b38/application-form",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/26-dashboard-job-application-form.png",
+      "ok": true
+    },
+    {
+      "name": "27-dashboard-job-candidates",
+      "route": "/dashboard/jobs/104b3186-23da-4c44-8519-0ceaba280b38/candidates",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/27-dashboard-job-candidates.png",
+      "ok": true
+    },
+    {
+      "name": "28-dashboard-job-ai-analysis",
+      "route": "/dashboard/jobs/104b3186-23da-4c44-8519-0ceaba280b38/ai-analysis",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/28-dashboard-job-ai-analysis.png",
+      "ok": true
+    },
+    {
+      "name": "29-dashboard-job-promote",
+      "route": "/dashboard/jobs/104b3186-23da-4c44-8519-0ceaba280b38/promote",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/29-dashboard-job-promote.png",
+      "ok": true
+    },
+    {
+      "name": "30-dashboard-job-rules",
+      "route": "/dashboard/jobs/104b3186-23da-4c44-8519-0ceaba280b38/rules",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/30-dashboard-job-rules.png",
+      "ok": true
+    },
+    {
+      "name": "31-dashboard-job-source-tracking",
+      "route": "/dashboard/jobs/104b3186-23da-4c44-8519-0ceaba280b38/source-tracking",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/31-dashboard-job-source-tracking.png",
+      "ok": true
+    },
+    {
+      "name": "32-dashboard-job-import",
+      "route": "/dashboard/jobs/104b3186-23da-4c44-8519-0ceaba280b38/import",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/32-dashboard-job-import.png",
+      "ok": true
+    },
+    {
+      "name": "33-dashboard-candidates",
+      "route": "/dashboard/candidates",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/33-dashboard-candidates.png",
+      "ok": true
+    },
+    {
+      "name": "34-dashboard-candidates-new",
+      "route": "/dashboard/candidates/new",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/34-dashboard-candidates-new.png",
+      "ok": true
+    },
+    {
+      "name": "35-dashboard-candidates-import",
+      "route": "/dashboard/candidates/import",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/35-dashboard-candidates-import.png",
+      "ok": true
+    },
+    {
+      "name": "36-dashboard-candidate-detail",
+      "route": "/dashboard/candidates/eb75969d-9612-4ea7-bc66-944690e904ec",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/36-dashboard-candidate-detail.png",
+      "ok": true
+    },
+    {
+      "name": "37-dashboard-applications",
+      "route": "/dashboard/applications",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/37-dashboard-applications.png",
+      "ok": true
+    },
+    {
+      "name": "38-dashboard-application-detail",
+      "route": "/dashboard/applications/34ccce95-fba8-459d-8798-5ff39aac9f43",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/38-dashboard-application-detail.png",
+      "ok": true
+    },
+    {
+      "name": "39-dashboard-interviews",
+      "route": "/dashboard/interviews",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/39-dashboard-interviews.png",
+      "ok": true
+    },
+    {
+      "name": "40-dashboard-interview-detail",
+      "route": "/dashboard/interviews/9d73cc92-5e0c-4c27-b4b2-231d02cb26ee",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/40-dashboard-interview-detail.png",
+      "ok": true
+    },
+    {
+      "name": "41-dashboard-interview-templates",
+      "route": "/dashboard/interviews/templates",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/41-dashboard-interview-templates.png",
+      "ok": true
+    },
+    {
+      "name": "42-dashboard-interview-templates-new",
+      "route": "/dashboard/interviews/templates/new",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/42-dashboard-interview-templates-new.png",
+      "ok": true
+    },
+    {
+      "name": "43-dashboard-source-tracking",
+      "route": "/dashboard/source-tracking",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/43-dashboard-source-tracking.png",
+      "ok": true
+    },
+    {
+      "name": "44-dashboard-source-tracking-detail",
+      "route": "/dashboard/source-tracking/373a97ed-0d03-4bf5-ba20-1fb5ef3d90c9",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/44-dashboard-source-tracking-detail.png",
+      "ok": true
+    },
+    {
+      "name": "45-dashboard-ai-analysis",
+      "route": "/dashboard/ai-analysis",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/45-dashboard-ai-analysis.png",
+      "ok": true
+    },
+    {
+      "name": "46-dashboard-chatbot",
+      "route": "/dashboard/chatbot",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/46-dashboard-chatbot.png",
+      "ok": true
+    },
+    {
+      "name": "47-dashboard-timeline",
+      "route": "/dashboard/timeline",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/47-dashboard-timeline.png",
+      "ok": true
+    },
+    {
+      "name": "48-dashboard-updates",
+      "route": "/dashboard/updates",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/48-dashboard-updates.png",
+      "ok": true
+    },
+    {
+      "name": "49-dashboard-settings",
+      "route": "/dashboard/settings",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/49-dashboard-settings.png",
+      "ok": true
+    },
+    {
+      "name": "50-dashboard-settings-account",
+      "route": "/dashboard/settings/account",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/50-dashboard-settings-account.png",
+      "ok": true
+    },
+    {
+      "name": "51-dashboard-settings-members",
+      "route": "/dashboard/settings/members",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/51-dashboard-settings-members.png",
+      "ok": true
+    },
+    {
+      "name": "52-dashboard-settings-notifications",
+      "route": "/dashboard/settings/notifications",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/52-dashboard-settings-notifications.png",
+      "ok": true
+    },
+    {
+      "name": "53-dashboard-settings-billing",
+      "route": "/dashboard/settings/billing",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/53-dashboard-settings-billing.png",
+      "ok": true
+    },
+    {
+      "name": "54-dashboard-settings-integrations",
+      "route": "/dashboard/settings/integrations",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/54-dashboard-settings-integrations.png",
+      "ok": true
+    },
+    {
+      "name": "55-dashboard-settings-localization",
+      "route": "/dashboard/settings/localization",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/55-dashboard-settings-localization.png",
+      "ok": true
+    },
+    {
+      "name": "56-dashboard-settings-retention",
+      "route": "/dashboard/settings/retention",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/56-dashboard-settings-retention.png",
+      "ok": true
+    },
+    {
+      "name": "57-dashboard-settings-sso",
+      "route": "/dashboard/settings/sso",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/57-dashboard-settings-sso.png",
+      "ok": true
+    },
+    {
+      "name": "58-dashboard-settings-career-page",
+      "route": "/dashboard/settings/career-page",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/58-dashboard-settings-career-page.png",
+      "ok": true
+    },
+    {
+      "name": "59-dashboard-settings-ai",
+      "route": "/dashboard/settings/ai",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/59-dashboard-settings-ai.png",
+      "ok": true
+    },
+    {
+      "name": "60-dashboard-settings-ai-new",
+      "route": "/dashboard/settings/ai/new",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/60-dashboard-settings-ai-new.png",
+      "ok": true
+    },
+    {
+      "name": "61-dashboard-settings-ai-detail",
+      "route": "/dashboard/settings/ai/5268f1cb-b396-46af-b056-eb28cdbc36c9",
+      "status": 200,
+      "file": "/Users/hoangnguyen/Personal/reqcore/ui-redesign-screenshots/61-dashboard-settings-ai-detail.png",
+      "ok": true
+    }
+  ],
+  "ok": 57,
+  "failed": 0
+}
