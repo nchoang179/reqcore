@@ -214,33 +214,29 @@ onUnmounted(() => {
   <div v-if="!activeJobId" class="relative z-20 border-b border-surface-200/80 dark:border-surface-800/80 bg-white/80 dark:bg-surface-900/80 backdrop-blur-xl">
       <div class="flex h-14 items-center justify-between px-4 lg:px-6">
         <!-- Left: Logo + Nav -->
-        <div class="flex min-w-0 flex-1 items-center gap-1 lg:gap-2">
-          <!-- Logo — links to marketing site (reqcore.com), not app root -->
-          <a
-            :href="useRuntimeConfig().public.marketingUrl"
-            class="flex shrink-0 items-center gap-2.5 px-2 py-1.5 rounded-lg no-underline hover:bg-surface-100/60 dark:hover:bg-surface-800/60 transition-colors mr-1 lg:mr-4"
-          >
-            <img src="/eagle-mascot-logo.png" alt="Reqcore mascot" class="size-7 shrink-0 object-contain" />
-            <span class="text-[15px] font-bold text-surface-900 dark:text-surface-100 hidden sm:block tracking-tight">Reqcore</span>
-          </a>
+        <div class="flex min-w-0 flex-1 items-center self-stretch gap-1 lg:gap-2">
+          <!-- Logo — static brand text, no link -->
+          <span class="flex shrink-0 items-center px-2 py-1.5 mr-1 lg:mr-4">
+            <span class="text-[15px] font-bold text-surface-900 dark:text-surface-100 hidden sm:block tracking-tight">ATS</span>
+          </span>
 
           <!-- Desktop nav links — scroll horizontally once they outgrow the bar.
                The More dropdown sits outside the scroll box so its panel, which
                hangs below the 56px row, isn't clipped by the overflow. -->
-          <nav class="hidden md:flex min-w-0 flex-1 items-center gap-0.5">
+          <nav class="hidden md:flex min-w-0 flex-1 items-stretch self-stretch gap-0.5">
             <div
               ref="navScrollerRoot"
-              class="flex min-w-0 items-center gap-0.5 overflow-x-auto scrollbar-none"
+              class="flex min-w-0 items-stretch gap-0.5 overflow-x-auto scrollbar-none"
               @wheel="onNavWheel"
             >
               <NuxtLink
                 v-for="item in primaryNavItems"
                 :key="item.to"
                 :to="$localePath(item.to)"
-                class="relative flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-1.5 rounded-lg text-[13px] font-medium transition-all duration-200 no-underline"
+                class="relative flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3 text-[13px] font-medium transition-colors duration-200 no-underline border-b-2"
                 :class="isActiveRoute(item.to, item.exact)
-                  ? 'text-brand-700 dark:text-brand-300 bg-brand-50/80 dark:bg-brand-950/40'
-                  : 'text-surface-600 dark:text-surface-400 hover:text-surface-900 dark:hover:text-surface-100 hover:bg-surface-100/80 dark:hover:bg-surface-800/60'"
+                  ? 'text-brand-700 dark:text-brand-300 border-brand-600 dark:border-brand-400'
+                  : 'text-surface-600 dark:text-surface-400 hover:text-surface-900 dark:hover:text-surface-100 border-transparent hover:border-surface-200 dark:hover:border-surface-700'"
               >
                 <component :is="item.icon" class="size-4" />
                 {{ item.label }}
@@ -255,10 +251,10 @@ onUnmounted(() => {
               @mouseleave="showMoreNav = false"
             >
               <button
-                class="relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[13px] font-medium transition-all duration-200 cursor-pointer border-0 bg-transparent"
+                class="relative flex h-full items-center gap-1.5 px-3 text-[13px] font-medium transition-colors duration-200 cursor-pointer border-0 bg-transparent border-b-2"
                 :class="moreNavItems.some(i => isActiveRoute(i.to, i.exact))
-                  ? 'text-brand-700 dark:text-brand-300 bg-brand-50/80 dark:bg-brand-950/40'
-                  : 'text-surface-600 dark:text-surface-400 hover:text-surface-900 dark:hover:text-surface-100 hover:bg-surface-100/80 dark:hover:bg-surface-800/60'"
+                  ? 'text-brand-700 dark:text-brand-300 border-brand-600 dark:border-brand-400'
+                  : 'text-surface-600 dark:text-surface-400 hover:text-surface-900 dark:hover:text-surface-100 border-transparent hover:border-surface-200 dark:hover:border-surface-700'"
               >
                 More
                 <ChevronDown

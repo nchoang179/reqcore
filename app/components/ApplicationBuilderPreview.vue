@@ -181,7 +181,6 @@ const metadata = computed(() => {
     <div class="min-h-0 overscroll-contain overflow-y-auto rounded-2xl bg-surface-50 dark:bg-surface-950/40">
       <div class="mx-auto space-y-4 transition-all" :class="previewMode === 'mobile' ? 'max-w-sm' : 'max-w-full'">
         <div class="overflow-hidden rounded-2xl border border-surface-200 bg-white shadow-sm dark:border-surface-800 dark:bg-surface-900">
-          <div class="h-1 bg-gradient-to-r from-brand-500 to-brand-400" />
           <div class="p-5">
             <div v-if="metadata.length" class="mb-3 flex flex-wrap gap-2">
               <span
