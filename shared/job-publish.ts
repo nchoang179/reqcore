@@ -84,14 +84,6 @@ export function missingPublishRequirements(
     })
   }
 
-  if (descriptionLength(job.description) < MIN_DESCRIPTION_CHARS) {
-    missing.push({
-      code: 'description_too_short',
-      field: 'description',
-      reason: `Job boards reject thin listings. Write at least ${MIN_DESCRIPTION_CHARS} characters of description.`,
-    })
-  }
-
   return missing
 }
 
