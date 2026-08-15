@@ -17,21 +17,22 @@
 @theme {
 
   /* ── Brand / Primary ──────────────────────────────────
-     Cornflower blue — centered on #6389ff. A lighter,
-     friendlier blue that reads well on both light and dark
-     surfaces. Used for primary actions, active nav, links.
-     Inspired by Supabase's approach (green → blue swap). */
-  --color-brand-50:  oklch(97.0% 0.012 264);
-  --color-brand-100: oklch(93.5% 0.030 264);
-  --color-brand-200: oklch(87.0% 0.065 264);
-  --color-brand-300: oklch(79.0% 0.115 264);
-  --color-brand-400: oklch(72.0% 0.150 264);
-  --color-brand-500: oklch(63.0% 0.170 264);
-  --color-brand-600: oklch(54.0% 0.200 264);
-  --color-brand-700: oklch(46.0% 0.180 264);
-  --color-brand-800: oklch(38.0% 0.150 264);
-  --color-brand-900: oklch(30.0% 0.110 264);
-  --color-brand-950: oklch(18.0% 0.050 264);
+     Indigo — centered on #4F46E5 (indigo-600). A deeper,
+     more confident primary than the previous cornflower;
+     reads premium and editorial while keeping high contrast
+     on both light and dark surfaces. Primary actions, active
+     nav, links. */
+  --color-brand-50:  oklch(97.2% 0.016 280);
+  --color-brand-100: oklch(93.8% 0.045 280);
+  --color-brand-200: oklch(87.5% 0.090 280);
+  --color-brand-300: oklch(78.5% 0.150 280);
+  --color-brand-400: oklch(68.0% 0.200 279);
+  --color-brand-500: oklch(58.5% 0.220 278);
+  --color-brand-600: oklch(51.0% 0.230 277);
+  --color-brand-700: oklch(43.5% 0.210 276);
+  --color-brand-800: oklch(36.5% 0.170 275);
+  --color-brand-900: oklch(29.0% 0.120 274);
+  --color-brand-950: oklch(20.0% 0.070 273);
 
   /* ── Accent ───────────────────────────────────────────
      Teal — transparency and auditability. Used sparingly for
@@ -49,23 +50,22 @@
   --color-accent-950: oklch(18.0% 0.030 190);
 
   /* ── Surface / neutrals ───────────────────────────────
-     Near-neutral gray ramp modeled on Supabase's pure-gray
-     dark palette. Very low chroma (≤ 0.006) prevents blue
-     cast in dark mode. Dark end sits around 13–17% for a
-     comfortable dark feel — darker than most, but lighter
-     than the near-black #09090b that felt too oppressive.
-     Light end is barely tinted for polish. */
-  --color-surface-50:  oklch(98.5% 0.002 264);
-  --color-surface-100: oklch(96.5% 0.004 264);
-  --color-surface-200: oklch(93.0% 0.006 264);
-  --color-surface-300: oklch(87.0% 0.008 264);
-  --color-surface-400: oklch(65.0% 0.006 264);
-  --color-surface-500: oklch(53.0% 0.006 264);
-  --color-surface-600: oklch(40.0% 0.005 264);
-  --color-surface-700: oklch(28.0% 0.005 264);
-  --color-surface-800: oklch(25.0% 0.004 264);
-  --color-surface-900: oklch(21.0% 0.003 264);
-  --color-surface-950: oklch(17.0% 0.003 264);
+     Warm stone ramp — a faint amber cast (hue ~55) instead
+     of the previous blue-tinted gray. Warmer, more editorial,
+     less "generic dev tool". Very low chroma (≤ 0.010) keeps
+     dark mode clean without a color cast. Dark end ~17% for
+     a comfortable dark feel. */
+  --color-surface-50:  oklch(98.7% 0.004 70);
+  --color-surface-100: oklch(96.8% 0.006 60);
+  --color-surface-200: oklch(93.5% 0.008 55);
+  --color-surface-300: oklch(87.5% 0.010 55);
+  --color-surface-400: oklch(66.0% 0.010 55);
+  --color-surface-500: oklch(54.0% 0.010 55);
+  --color-surface-600: oklch(41.0% 0.008 55);
+  --color-surface-700: oklch(29.0% 0.007 55);
+  --color-surface-800: oklch(25.5% 0.006 55);
+  --color-surface-900: oklch(21.5% 0.005 55);
+  --color-surface-950: oklch(17.5% 0.004 55);
 
   /* ── Success ──────────────────────────────────────────
      Emerald — hired, active, verified, healthy states. */
@@ -650,4 +650,29 @@
 @keyframes pipeline-dot-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
+}
+
+/* ── Reduced motion ─────────────────────────────────────
+   Respect prefers-reduced-motion: drop decorative entrance
+   animations, transitions, and the active-tab dot pulse.
+   Functional spinners (loading indicators) are left intact
+   — they signal state, not decoration. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .hero-animate,
+  .hero-animate-scale,
+  .scroll-fade,
+  .scroll-fade .stagger-child {
+    opacity: 1;
+    filter: none;
+    transform: none;
+  }
 }

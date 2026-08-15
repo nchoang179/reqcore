@@ -1346,7 +1346,27 @@ function handleKeyNavigation(event: KeyboardEvent) {
     return
   }
 
-  if ((event.target as HTMLElement)?.tagName === 'INPUT' || (event.target as HTMLElement)?.tagName === 'TEXTAREA' || (event.target as HTMLElement)?.tagName === 'SELECT') return
+  // Trap Tab inside the document preview dialog while it is open.
+  if (event.key === 'Tab' && showDocPreview.value) {
+    const dialog = docPreviewDialog.value
+    if (dialog) {
+      const focusables = dialog.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), iframe, [tabindex]:not([tabindex="-1"])')
+      if (focusables.length > 0) {
+        const first = focusables[0]!
+        const last = focusables[focusables.length - 1]!
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault()
+          last.focus()
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault()
+          first.focus()
+        }
+      }
+    }
+  }
+
+  const t = event.target as HTMLElement
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
 
   if (event.key === 'ArrowUp') {
     event.preventDefault()
@@ -1429,6 +1449,8 @@ const docPreviewUrl = ref<string | null>(null)
 const docPreviewFilename = ref('')
 const docPreviewMimeType = ref('')
 const docPreviewDocId = ref<string | null>(null)
+const docPreviewDialog = ref<HTMLElement | null>(null)
+const lastFocusedBeforePreview = ref<HTMLElement | null>(null)
 
 const isDocPreviewPdf = computed(() => docPreviewMimeType.value === 'application/pdf')
 
@@ -1444,6 +1466,8 @@ function handleDocPreview(doc: SwipeDocument) {
   docPreviewMimeType.value = doc.mimeType
   docPreviewUrl.value = getPreviewUrl(doc.id)
   showDocPreview.value = true
+  lastFocusedBeforePreview.value = document.activeElement as HTMLElement | null
+  nextTick(() => docPreviewDialog.value?.focus())
 }
 
 function closeDocPreview() {
@@ -1452,6 +1476,7 @@ function closeDocPreview() {
   docPreviewFilename.value = ''
   docPreviewMimeType.value = ''
   docPreviewDocId.value = null
+  lastFocusedBeforePreview.value?.focus()
 }
 </script>
 
@@ -1503,11 +1528,14 @@ function closeDocPreview() {
       <!-- PIPELINE STATUS TABS                     -->
       <!-- ═══════════════════════════════════════ -->
       <div class="shrink-0 border-b border-surface-200/80 bg-white dark:border-surface-800/60 dark:bg-surface-900">
-        <div class="flex items-center gap-1 overflow-x-auto scrollbar-thin sm:scrollbar-none px-3 sm:px-5 py-2">
+        <div role="tablist" aria-label="Pipeline stages" class="flex items-center gap-1 overflow-x-auto scrollbar-thin sm:scrollbar-none px-3 sm:px-5 py-2">
           <button
             v-for="status in PIPELINE_STATUSES"
             :key="`tab-${status}`"
-            class="relative flex shrink-0 cursor-pointer items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition-all duration-200 focus:outline-none"
+            role="tab"
+            :aria-selected="isFocusStatus(status)"
+            :tabindex="isFocusStatus(status) ? 0 : -1"
+            class="relative flex shrink-0 cursor-pointer items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40"
             :class="isFocusStatus(status)
               ? 'bg-brand-50 text-brand-700 shadow-sm ring-1 ring-brand-200/60 dark:bg-brand-950/40 dark:text-brand-300 dark:ring-brand-800/40'
               : 'text-surface-500 hover:bg-surface-50 hover:text-surface-700 dark:text-surface-400 dark:hover:bg-surface-800/60 dark:hover:text-surface-200'"
@@ -1534,8 +1562,9 @@ function closeDocPreview() {
 
           <!-- Fullscreen toggle -->
           <button
-            class="ml-auto flex shrink-0 cursor-pointer items-center justify-center rounded-lg p-2 text-surface-400 hover:bg-surface-100 hover:text-surface-600 dark:text-surface-500 dark:hover:bg-surface-800 dark:hover:text-surface-300 transition-all duration-200 focus:outline-none"
+            class="ml-auto flex shrink-0 cursor-pointer items-center justify-center rounded-lg p-2 text-surface-400 hover:bg-surface-100 hover:text-surface-600 dark:text-surface-500 dark:hover:bg-surface-800 dark:hover:text-surface-300 transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40"
             :title="isFullscreen ? 'Exit focus mode (Esc)' : 'Focus mode'"
+            :aria-label="isFullscreen ? 'Exit focus mode' : 'Focus mode'"
             @click="toggleFullscreen"
           >
             <Minimize2 v-if="isFullscreen" class="size-4" />
@@ -1561,6 +1590,7 @@ function closeDocPreview() {
               <input
                 v-model="searchTerm"
                 type="text"
+                aria-label="Search candidates"
                 placeholder="Search candidates…"
                 class="w-full rounded-lg border border-surface-200/80 bg-surface-50/80 py-2 pl-8 pr-3 text-sm text-surface-900 placeholder:text-surface-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/20 dark:border-surface-700/80 dark:bg-surface-800/60 dark:text-surface-100 dark:placeholder:text-surface-500 dark:focus:border-brand-500 dark:focus:ring-brand-500/20 transition-all duration-150"
                 @focus="closePanels"
@@ -1573,6 +1603,8 @@ function closeDocPreview() {
               <div class="relative flex-1 min-w-0">
                 <button
                   class="flex w-full cursor-pointer items-center gap-1.5 rounded-md border px-2 py-1.5 text-left transition-all duration-150"
+                  aria-haspopup="true"
+                  :aria-expanded="showSortPanel"
                   :class="showSortPanel
                     ? 'border-brand-300 bg-brand-50/50 text-brand-700 dark:border-brand-600 dark:bg-brand-950/30 dark:text-brand-300'
                     : 'border-surface-200/80 bg-surface-50/50 text-surface-600 hover:border-surface-300 hover:bg-surface-50 dark:border-surface-700/80 dark:bg-surface-800/40 dark:text-surface-300 dark:hover:border-surface-600 dark:hover:bg-surface-800'"
@@ -1616,6 +1648,9 @@ function closeDocPreview() {
               <!-- Filter button -->
               <button
                 class="relative flex cursor-pointer items-center gap-1 rounded-md border px-2 py-1.5 transition-all duration-150"
+                aria-label="Filters"
+                aria-haspopup="true"
+                :aria-expanded="showFilterPanel"
                 :class="showFilterPanel || hasActiveFilters
                   ? 'border-brand-300 bg-brand-50/50 text-brand-700 dark:border-brand-600 dark:bg-brand-950/30 dark:text-brand-300'
                   : 'border-surface-200/80 bg-surface-50/50 text-surface-600 hover:border-surface-300 hover:bg-surface-50 dark:border-surface-700/80 dark:bg-surface-800/40 dark:text-surface-300 dark:hover:border-surface-600 dark:hover:bg-surface-800'"
@@ -1722,6 +1757,7 @@ function closeDocPreview() {
                 type="button"
                 class="inline-flex size-6 items-center justify-center rounded-md text-surface-500 hover:bg-surface-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-surface-400 dark:hover:bg-surface-800"
                 :disabled="page <= 1"
+                aria-label="Previous page"
                 title="Previous page"
                 @click="page--"
               >
@@ -1732,6 +1768,7 @@ function closeDocPreview() {
                 type="button"
                 class="inline-flex size-6 items-center justify-center rounded-md text-surface-500 hover:bg-surface-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-surface-400 dark:hover:bg-surface-800"
                 :disabled="page >= totalPages"
+                aria-label="Next page"
                 title="Next page"
                 @click="page++"
               >
@@ -1777,6 +1814,7 @@ function closeDocPreview() {
               v-for="(app, idx) in filteredApplications"
               :key="app.id"
               :data-candidate-idx="idx"
+              :aria-current="currentIndex === idx ? 'true' : undefined"
               class="pipeline-candidate-card group flex w-full cursor-pointer items-start gap-3 px-3.5 py-3 text-left transition-all duration-150"
               :class="currentIndex === idx
                 ? 'bg-brand-50/70 dark:bg-brand-950/20 border-l-[3px] border-l-brand-500 dark:border-l-brand-400'
@@ -1800,9 +1838,10 @@ function closeDocPreview() {
                        recruiter has never opened. -->
                   <span
                     v-if="!isViewed(app)"
+                    aria-hidden="true"
                     class="size-1.5 shrink-0 rounded-full bg-brand-500 dark:bg-brand-400"
-                    title="You haven't viewed this applicant yet"
                   />
+                  <span v-if="!isViewed(app)" class="sr-only">unviewed</span>
                   <span class="truncate">{{ formatPersonName(app.candidateFirstName, app.candidateLastName) }}</span>
                 </p>
                 <p class="mt-0.5 block truncate text-xs text-surface-500 dark:text-surface-400">{{ app.candidateEmail }}</p>
@@ -1935,6 +1974,7 @@ function closeDocPreview() {
                           <button
                             :disabled="currentIndex <= 0 && page <= 1"
                             class="flex cursor-pointer items-center justify-center rounded-lg border border-surface-200 p-1.5 text-surface-500 transition-all duration-150 hover:border-surface-300 hover:bg-white hover:text-surface-700 disabled:cursor-not-allowed disabled:opacity-40 dark:border-surface-700 dark:text-surface-400 dark:hover:border-surface-600 dark:hover:bg-surface-800 dark:hover:text-surface-300"
+                            aria-label="Previous candidate"
                             @click="goToPreviousCard"
                           >
                             <ArrowLeft class="size-4" />
@@ -1945,6 +1985,7 @@ function closeDocPreview() {
                           <button
                             :disabled="currentIndex >= filteredApplications.length - 1 && page >= totalPages"
                             class="flex cursor-pointer items-center justify-center rounded-lg border border-surface-200 p-1.5 text-surface-500 transition-all duration-150 hover:border-surface-300 hover:bg-white hover:text-surface-700 disabled:cursor-not-allowed disabled:opacity-40 dark:border-surface-700 dark:text-surface-400 dark:hover:border-surface-600 dark:hover:bg-surface-800 dark:hover:text-surface-300"
+                            aria-label="Next candidate"
                             @click="goToNextCard"
                           >
                             <ArrowRight class="size-4" />
@@ -1953,6 +1994,7 @@ function closeDocPreview() {
                         <button
                           class="hidden cursor-pointer items-center justify-center rounded-lg border border-surface-200 p-1.5 text-surface-500 transition-all duration-150 hover:border-surface-300 hover:bg-white hover:text-surface-700 dark:border-surface-700 dark:text-surface-400 dark:hover:border-surface-600 dark:hover:bg-surface-800 dark:hover:text-surface-300 lg:flex"
                           :aria-pressed="isWideDetail"
+                          :aria-label="isWideDetail ? 'Use centered width' : 'Use full width'"
                           :title="isWideDetail ? 'Use centered width' : 'Use full width'"
                           @click="isWideDetail = !isWideDetail"
                         >
@@ -1962,6 +2004,7 @@ function closeDocPreview() {
                         <NuxtLink
                           :to="$localePath(`/dashboard/applications/${currentSummary.id}`)"
                           class="flex items-center justify-center rounded-lg border border-surface-200 p-1.5 text-surface-500 transition-all duration-150 hover:border-surface-300 hover:bg-white hover:text-surface-700 dark:border-surface-700 dark:text-surface-400 dark:hover:border-surface-600 dark:hover:bg-surface-800 dark:hover:text-surface-300"
+                          aria-label="Open full application page"
                           title="Full application page"
                         >
                           <ExternalLink class="size-4" />
@@ -1996,12 +2039,15 @@ function closeDocPreview() {
 
             <!-- Detail tabs -->
             <div class="shrink-0 border-b border-surface-200/80 bg-white px-4 sm:px-6 py-1 dark:border-surface-800/60 dark:bg-surface-900">
-              <div ref="tabBar" class="relative mx-auto flex items-center gap-0.5 whitespace-nowrap" :class="detailWidthClass">
+              <div ref="tabBar" role="tablist" aria-label="Candidate detail" class="relative mx-auto flex items-center gap-0.5 whitespace-nowrap" :class="detailWidthClass">
                 <div ref="overviewDropdownRef" class="relative shrink-0">
                   <div class="flex items-center rounded-md transition-colors duration-150" :class="detailTab === 'overview'
                     ? 'bg-brand-50 dark:bg-brand-500/15'
                     : 'hover:bg-surface-100 dark:hover:bg-surface-800/60'">
                     <button
+                      role="tab"
+                      :aria-selected="detailTab === 'overview'"
+                      :tabindex="detailTab === 'overview' ? 0 : -1"
                       class="cursor-pointer px-2.5 py-1 text-[13px] font-medium transition-colors duration-150"
                       :class="detailTab === 'overview'
                         ? 'text-brand-700 dark:text-brand-300'
@@ -2013,6 +2059,9 @@ function closeDocPreview() {
                     <button
                       v-if="detailTab === 'overview'"
                       class="cursor-pointer -ml-1.5 pr-1.5 py-1 rounded transition-colors duration-150 text-brand-400 hover:text-brand-600 dark:text-brand-400/70 dark:hover:text-brand-300"
+                      aria-label="Toggle overview sections"
+                      aria-haspopup="true"
+                      :aria-expanded="showOverviewDropdown"
                       @click.stop="showOverviewDropdown = !showOverviewDropdown"
                     >
                       <ChevronDown class="size-3.5 transition-transform duration-150" :class="showOverviewDropdown ? 'rotate-180' : ''" />
@@ -2068,6 +2117,9 @@ function closeDocPreview() {
                 <button
                   v-for="tab in visibleTabs"
                   :key="tab.key"
+                  role="tab"
+                  :aria-selected="detailTab === tab.key"
+                  :tabindex="detailTab === tab.key ? 0 : -1"
                   class="shrink-0 cursor-pointer rounded-md px-2.5 py-1 text-[13px] font-medium transition-colors duration-150 flex items-center gap-1.5"
                   :class="detailTab === tab.key
                     ? 'bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-300'
@@ -2089,6 +2141,7 @@ function closeDocPreview() {
                       ? 'bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-300'
                       : 'text-surface-500 hover:text-surface-700 hover:bg-surface-100 dark:text-surface-400 dark:hover:text-surface-300 dark:hover:bg-surface-800/60'"
                     :aria-expanded="showTabOverflowMenu"
+                    aria-haspopup="menu"
                     aria-label="More tabs"
                     @click.stop="showTabOverflowMenu = !showTabOverflowMenu"
                   >
@@ -2247,6 +2300,7 @@ function closeDocPreview() {
                     <!-- Interview card header (always visible) -->
                     <button
                       class="flex w-full cursor-pointer items-center justify-between gap-4 px-4 py-3 text-left"
+                      :aria-expanded="expandedInterviewId === iv.id"
                       @click="toggleInterviewExpand(iv.id)"
                     >
                       <div class="flex items-center gap-3 min-w-0">
@@ -2477,6 +2531,7 @@ function closeDocPreview() {
                                   <button
                                     v-if="interviewEditForm.interviewers.length > 1"
                                     class="cursor-pointer rounded-md p-1 text-surface-400 hover:text-danger-500 hover:bg-danger-50 dark:hover:bg-danger-950/40 transition-colors"
+                                    aria-label="Remove interviewer"
                                     @click.stop="removeEditInterviewer(idx)"
                                   >
                                     <X class="size-3.5" />
@@ -2771,6 +2826,7 @@ function closeDocPreview() {
                           v-if="canEditNote(note)"
                           type="button"
                           class="cursor-pointer rounded-lg p-1.5 text-surface-400 transition-colors hover:bg-surface-100 hover:text-surface-600 dark:hover:bg-surface-800 dark:hover:text-surface-300"
+                          aria-label="Edit note"
                           title="Edit note"
                           @click="startEditNote(note)"
                         >
@@ -2781,6 +2837,7 @@ function closeDocPreview() {
                           type="button"
                           class="cursor-pointer rounded-lg p-1.5 text-surface-400 transition-colors hover:bg-danger-50 hover:text-danger-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-danger-950/40 dark:hover:text-danger-400"
                           :disabled="deletingNoteId === note.id"
+                          aria-label="Delete note"
                           title="Delete note"
                           @click="deleteNote(note)"
                         >
@@ -2959,9 +3016,10 @@ function closeDocPreview() {
               >
                 <span
                   v-if="!isViewed(app)"
+                  aria-hidden="true"
                   class="size-1.5 shrink-0 rounded-full bg-brand-500 dark:bg-brand-400"
-                  title="You haven't viewed this applicant yet"
                 />
+                <span v-if="!isViewed(app)" class="sr-only">unviewed</span>
                 <span class="truncate">{{ app.candidateFirstName }}</span>
               </p>
               <div class="flex items-center gap-1 mt-0.5">
@@ -3032,7 +3090,7 @@ function closeDocPreview() {
 
     <!-- Document Preview Modal -->
     <Teleport :to="teleportTarget">
-      <div v-if="showDocPreview" class="fixed inset-0 z-50 flex items-center justify-center px-4 py-6">
+      <div v-if="showDocPreview" ref="docPreviewDialog" role="dialog" aria-modal="true" aria-label="Document preview" tabindex="-1" class="fixed inset-0 z-50 flex items-center justify-center px-4 py-6">
         <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" @click="closeDocPreview" />
         <div class="relative flex flex-col bg-white dark:bg-surface-900 rounded-2xl shadow-2xl shadow-surface-900/10 dark:shadow-black/30 ring-1 ring-surface-200/80 dark:ring-surface-700/60 w-full max-w-4xl" style="height: calc(100vh - 3rem);">
           <!-- Header -->
@@ -3052,6 +3110,7 @@ function closeDocPreview() {
               </a>
               <button
                 class="rounded-lg p-1.5 text-surface-500 hover:text-surface-700 hover:bg-surface-100 dark:hover:text-surface-300 dark:hover:bg-surface-800 transition-colors"
+                aria-label="Close preview"
                 title="Close"
                 @click="closeDocPreview"
               >
