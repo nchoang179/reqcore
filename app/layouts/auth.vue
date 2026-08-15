@@ -23,6 +23,7 @@ const route = useRoute();
 // the same source of truth and the half-filled form survives a query change.
 const isSignUp = computed(() => route.path.includes("/auth/sign-up"));
 const isSignIn = computed(() => route.path.includes("/auth/sign-in"));
+const isOnboarding = computed(() => route.path.includes("/onboarding"));
 const selectedIntent = computed(() => parseBillingCheckoutIntent(route.query));
 const isFreeSelected = computed(() => hasFreePlanIntent(route.query));
 const selectedCadence = computed<BillingCadence>(() =>
@@ -154,7 +155,7 @@ function setCadence(cadence: BillingCadence) {
          can sit dead-center of the screen while the branding stays on the
          side. Hidden below xl, where there isn't room for both. ── -->
         <aside
-            v-if="!isSignUp"
+            v-if="!isSignUp && !isOnboarding"
             class="absolute inset-y-0 right-0 z-20 hidden w-[26rem] flex-col overflow-hidden border-l border-surface-200 bg-surface-100 p-12 xl:flex dark:border-transparent dark:bg-[#09090b]"
         >
             <!-- Logo mark -->
