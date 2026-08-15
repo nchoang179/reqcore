@@ -52,24 +52,6 @@ const postOrgRedirect = computed(() => {
   })
 })
 
-// A brand-new org gets the one-time onboarding survey before its final
-// destination. We thread the plan/cadence through so the survey can show the
-// chosen plan, tag the answers in PostHog, and continue to checkout/dashboard
-// itself. Returning users (org picker / join / auto-switch) skip the survey and
-// use postOrgRedirect directly.
-const postCreateRedirect = computed(() => {
-  if (pendingCheckoutIntent.value) {
-    return localePath({
-      path: '/onboarding/welcome',
-      query: buildBillingCheckoutQuery(pendingCheckoutIntent.value),
-    })
-  }
-  if (hasFreePlanIntent(route.query)) {
-    return localePath({ path: '/onboarding/welcome', query: { plan: 'free' } })
-  }
-  return localePath('/onboarding/welcome')
-})
-
 // ─────────────────────────────────────────────
 // Auto-switch: if user already belongs to exactly one org, activate it
 // ─────────────────────────────────────────────
@@ -151,7 +133,7 @@ async function handleCreateOrg() {
     trackConversion('org_created')
     await createOrg(
       { name: orgName.value.trim(), slug: slug.value.trim() },
-      { redirectTo: postCreateRedirect.value },
+      { redirectTo: postOrgRedirect.value },
     )
   }
   catch (err: any) {
