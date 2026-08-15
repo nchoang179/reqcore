@@ -1,11 +1,10 @@
-conca<script setup lang="ts">
+<script setup lang="ts">
 import {
   Save, Trash2, Globe2,
 } from 'lucide-vue-next'
 import { z } from 'zod'
 import type { LocationSelection } from '~/components/LocationCombobox.vue'
 import { hasPublishableLocation, isValidPostalCode, normalizePostalCode, POSTAL_CODE_MAX_LENGTH } from '~~/shared/job-location'
-import { descriptionLength, MIN_DESCRIPTION_CHARS } from '~~/shared/job-publish'
 
 definePageMeta({
   layout: 'dashboard',
@@ -104,14 +103,6 @@ const needsLocation = computed(() => !hasPublishableLocation({
   locationCountry: form.value.locationCountry,
   remoteStatus: form.value.remoteStatus || null,
 }))
-
-/**
- * Same story for the description: boards reject thin listings, and the publish
- * guard refuses a role that would be rejected — so show the shortfall here,
- * where it gets fixed, rather than only at the moment publishing fails.
- */
-const descriptionChars = computed(() => descriptionLength(form.value.description))
-const needsDescription = computed(() => descriptionChars.value < MIN_DESCRIPTION_CHARS)
 
 // When "Negotiable" is toggled on, clear the salary range fields
 watch(() => form.value.salaryNegotiable, (negotiable) => {
@@ -332,13 +323,8 @@ function onSalaryMaxChange(e: Event) {
                 v-model="form.description"
                 rows="6"
                 placeholder="Describe the role, responsibilities, and requirements…"
-                class="w-full rounded-lg border px-3 py-2 text-sm text-surface-900 dark:text-surface-100 bg-white dark:bg-surface-800 placeholder:text-surface-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-colors"
-                :class="needsDescription ? 'border-warning-300 dark:border-warning-800' : 'border-surface-300 dark:border-surface-700'"
+                class="w-full rounded-lg border border-surface-300 dark:border-surface-700 px-3 py-2 text-sm text-surface-900 dark:text-surface-100 bg-white dark:bg-surface-800 placeholder:text-surface-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-colors"
               />
-              <p v-if="needsDescription" class="mt-1 text-xs text-warning-700 dark:text-warning-400">
-                Job boards reject thin listings — write at least {{ MIN_DESCRIPTION_CHARS }} characters
-                ({{ descriptionChars }} so far) for this role to be published and syndicated.
-              </p>
             </div>
 
             <!-- Roles from before the location picker have only free text,

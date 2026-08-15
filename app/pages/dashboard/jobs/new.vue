@@ -758,14 +758,11 @@ function validatePublishRequirements(): boolean {
 
 /** Everything Job details has to have before the wizard moves past it. */
 function validateJobDetails(): boolean {
-  // Order matters: `validateStep1` clears `errors`, so it has to run first.
-  const schemaValid = validateStep1()
-  const publishReady = validatePublishRequirements()
-  return schemaValid && publishReady
+  return validateStep1()
 }
 
 const canGoNext = computed(() => {
-  if (currentStep.value === 1) return isStep1Valid.value && publishBlockers.value.length === 0
+  if (currentStep.value === 1) return isStep1Valid.value
   return true
 })
 
