@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Link2, ClipboardCopy } from 'lucide-vue-next'
+
 
 definePageMeta({
   layout: 'dashboard',
@@ -8,7 +8,6 @@ definePageMeta({
 
 const route = useRoute()
 const jobId = route.params.id as string
-const toast = useToast()
 
 const { job, status: fetchStatus, error, updateJob } = useJob(jobId)
 
@@ -17,29 +16,6 @@ useSeoMeta({
     job.value ? `Application Form — ${job.value.title} — Reqcore` : 'Application Form — Reqcore',
   ),
 })
-
-// ─────────────────────────────────────────────
-// Application link
-// ─────────────────────────────────────────────
-
-const requestUrl = useRequestURL()
-const applicationUrl = computed(() => {
-  const base = `${requestUrl.protocol}//${requestUrl.host}`
-  return `${base}/jobs/${job.value?.slug ?? jobId}/apply`
-})
-
-const linkCopied = ref(false)
-
-async function copyApplicationLink() {
-  try {
-    await navigator.clipboard.writeText(applicationUrl.value)
-    linkCopied.value = true
-    setTimeout(() => { linkCopied.value = false }, 2000)
-  } catch {
-    // Fallback for non-HTTPS contexts
-    toast.info(applicationUrl.value)
-  }
-}
 
 // ─────────────────────────────────────────────
 // Live application builder — shared with the create-job wizard.
@@ -142,26 +118,6 @@ const builderOperations = {
       -->
       <div class="builder-layout mb-6">
         <div class="rounded-lg border border-surface-200 dark:border-surface-800 bg-white dark:bg-surface-900 min-w-0 overflow-hidden">
-          <!-- Application link pinned to top of the form card -->
-          <div v-if="job.status === 'open'" class="flex items-center gap-3 px-5 py-3 bg-brand-50 dark:bg-brand-950/50 border-b border-brand-100 dark:border-brand-900">
-            <Link2 class="size-4 text-brand-500 dark:text-brand-400 shrink-0" />
-            <div class="flex-1 min-w-0">
-              <p class="text-[10px] font-semibold uppercase tracking-wider text-brand-500 dark:text-brand-400 mb-0.5">Application link</p>
-              <input
-                type="text"
-                readonly
-                :value="applicationUrl"
-                class="w-full bg-transparent text-xs text-brand-700 dark:text-brand-300 select-all outline-none font-mono"
-              />
-            </div>
-            <button
-              class="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 transition-colors shrink-0"
-              @click="copyApplicationLink"
-            >
-              <ClipboardCopy class="size-3.5" />
-              {{ linkCopied ? 'Copied!' : 'Copy link' }}
-            </button>
-          </div>
           <div class="p-5">
             <ApplicationBuilder
               v-model="builderModel"

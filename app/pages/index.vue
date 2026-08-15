@@ -1,114 +1,19 @@
 <script setup lang="ts">
-import { ArrowRight, Briefcase, CheckCircle2, Sparkles, Users } from 'lucide-vue-next'
+// Root redirect: Reqcore is a logged-in app. The index route redirects guests
+// to the sign-in page (and keeps authenticated users on the dashboard) so the
+// marketing landing page never sits between the user and the product.
 
-const { t } = useI18n()
 const localePath = useLocalePath()
 const { data: session } = await authClient.useSession(useFetch)
 
-const pillars = computed(() => [
-  { icon: Briefcase, label: t('home.pillars.yourData.label'), desc: t('home.pillars.yourData.desc') },
-  { icon: Sparkles, label: t('home.pillars.auditable.label'), desc: t('home.pillars.auditable.desc') },
-  { icon: Users, label: t('home.pillars.unlimitedSeats.label'), desc: t('home.pillars.unlimitedSeats.desc') },
-])
+definePageMeta({ layout: 'auth' })
 
-useHead({ title: 'Reqcore' })
-definePageMeta({ layout: false })
+await navigateTo(
+  session.value?.user ? localePath('/dashboard') : localePath('/auth/sign-in'),
+  { replace: true },
+)
 </script>
 
 <template>
-  <div class="relative min-h-screen overflow-hidden bg-white dark:bg-[#09090b]">
-    <!-- Ambient glow -->
-    <div
-      class="pointer-events-none absolute top-[-40%] left-1/2 h-[800px] w-[900px] -translate-x-1/2 rounded-full opacity-[0.07]"
-      style="background: radial-gradient(ellipse at center, var(--color-brand-500), transparent 70%)"
-    />
-
-    <PublicNavBar />
-
-    <main class="relative pb-24">
-      <div class="mx-auto max-w-5xl px-6 pt-36">
-        <!-- ── Hero ── -->
-        <div class="flex flex-col items-center text-center">
-          <h1 class="hero-animate hero-delay-1 text-5xl font-bold leading-[1.1] tracking-tight text-surface-900 dark:text-white sm:text-6xl lg:text-7xl">
-            {{ $t('home.hero.titleLine1') }}
-            <br />
-            <span class="bg-gradient-to-r from-brand-400 to-accent-400 bg-clip-text text-transparent">
-              {{ $t('home.hero.titleHighlight') }}
-            </span>
-          </h1>
-
-          <p class="hero-animate hero-delay-2 mt-6 max-w-md text-base leading-relaxed text-surface-600 dark:text-surface-400 sm:text-lg">
-            {{ $t('home.hero.subtitle') }}
-          </p>
-
-          <div class="hero-animate hero-delay-4 mt-10 flex flex-wrap items-center justify-center gap-3">
-            <NuxtLink
-              v-if="session?.user"
-              :to="localePath('/dashboard')"
-              class="group flex items-center gap-2 rounded-lg bg-surface-900 dark:bg-white px-6 py-3 text-[14px] font-semibold text-white dark:text-[#09090b] transition hover:bg-surface-800 dark:hover:bg-white/90"
-            >
-              {{ $t('home.hero.goToDashboard') }}
-              <ArrowRight class="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
-            </NuxtLink>
-            <template v-else>
-              <NuxtLink
-                :to="localePath('/auth/sign-in?live=1')"
-                class="group flex items-center gap-2 rounded-lg bg-surface-900 dark:bg-white px-6 py-3 text-[14px] font-semibold text-white dark:text-[#09090b] transition hover:bg-surface-800 dark:hover:bg-white/90"
-              >
-                {{ $t('home.hero.ctaDemo') }}
-                <ArrowRight class="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
-              </NuxtLink>
-              <NuxtLink
-                :to="localePath('/auth/sign-up')"
-                class="rounded-lg border border-surface-300 dark:border-white/[0.08] bg-surface-100 dark:bg-white/[0.03] px-6 py-3 text-[14px] font-medium text-surface-600 dark:text-surface-300 transition hover:border-surface-400 dark:hover:border-white/[0.14] hover:bg-surface-200 dark:hover:bg-white/[0.06]"
-              >
-                {{ $t('home.hero.createAccount') }}
-              </NuxtLink>
-            </template>
-          </div>
-        </div>
-
-        <!-- ── Pillars ── -->
-        <div class="hero-animate hero-delay-5 mx-auto mt-28 grid max-w-3xl gap-4 sm:grid-cols-3">
-          <div
-            v-for="pillar in pillars"
-            :key="pillar.label"
-            class="bento-card relative rounded-xl p-6"
-          >
-            <component :is="pillar.icon" class="mb-4 h-5 w-5 text-brand-400" />
-            <h2 class="text-[15px] font-semibold text-surface-900 dark:text-white">{{ pillar.label }}</h2>
-            <p class="mt-1.5 text-[13px] leading-relaxed text-surface-600 dark:text-surface-400">{{ pillar.desc }}</p>
-          </div>
-        </div>
-      </div>
-
-      <PublicPricingSection
-        heading-tag="h2"
-        :signed-in="Boolean(session?.user)"
-      />
-
-      <!-- ── Footer ── -->
-      <footer class="hero-animate hero-delay-5 mx-auto mt-8 flex max-w-5xl flex-col items-center gap-4 px-6 text-center">
-        <div class="flex items-center gap-5">
-          <NuxtLink
-            :to="localePath('/pricing')"
-            class="flex items-center gap-1.5 text-[13px] text-surface-500 transition hover:text-surface-700 dark:hover:text-surface-300"
-          >
-            <CheckCircle2 class="h-4 w-4" />
-            {{ $t('home.footer.source') }}
-          </NuxtLink>
-          <NuxtLink
-            :to="localePath('/jobs')"
-            class="flex items-center gap-1.5 text-[13px] text-surface-500 transition hover:text-surface-700 dark:hover:text-surface-300"
-          >
-            <Briefcase class="h-3.5 w-3.5" />
-            {{ $t('home.nav.openPositions') }}
-          </NuxtLink>
-        </div>
-        <p class="text-[12px] text-surface-500 dark:text-surface-600">
-          {{ $t('home.footer.tagline') }}
-        </p>
-      </footer>
-    </main>
-  </div>
+  <div />
 </template>

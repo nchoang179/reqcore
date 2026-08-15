@@ -49,46 +49,6 @@ const i18nLocales = [
   },
 ];
 
-const localizedPublicRouteRules = Object.fromEntries(
-  i18nLocales
-    .filter((locale) => locale.code !== i18nDefaultLocale)
-    .flatMap((locale) => [
-      [`/${locale.code}/pricing`, { isr: 3600 }],
-      [`/${locale.code}/jobs`, { isr: 3600 }],
-      [`/${locale.code}/jobs/**`, { isr: 3600 }],
-    ]),
-);
-
-const localizedPricingRedirectRules = Object.fromEntries(
-  i18nLocales
-    .filter((locale) => locale.code !== i18nDefaultLocale)
-    .map((locale) => [
-      `/${locale.code}/pricing-v5`,
-      { redirect: { to: `/${locale.code}/pricing`, statusCode: 301 } },
-    ]),
-);
-
-// Allow search-engine indexing for localized public *marketing* pages only.
-// Pricing is genuinely translated, so its localized variants are indexable.
-//
-// Job postings and career pages are NOT listed here on purpose: their content
-// (job title/description, org headline) is recruiter-authored in a single
-// language and served verbatim under every locale prefix — the surrounding UI
-// chrome is the only thing translated. Indexing /es/jobs/x, /fr/career/x, … as
-// separate URLs would publish 6× near-duplicate, untranslated pages with
-// hreflang claiming translations that don't exist. Instead these localized
-// variants inherit the default "noindex, nofollow" (the `/**` rule below), so
-// only the unprefixed default-locale URL is indexed while applicants can still
-// browse/apply in their language. See app/pages/{jobs,career}/[slug]/index.vue.
-const localizedPublicRobotsRules = Object.fromEntries(
-  i18nLocales
-    .filter((locale) => locale.code !== i18nDefaultLocale)
-    .map((locale) => [
-      `/${locale.code}/pricing`,
-      { headers: { "X-Robots-Tag": "index, follow" } },
-    ]),
-);
-
 const isRailwayPreview =
   railwayEnvironmentName.startsWith("pr") ||
   railwayEnvironmentName.includes("pr-") ||
@@ -292,12 +252,6 @@ export default defineNuxtConfig({
     // to eu-assets.i.posthog.com and everything else to eu.i.posthog.com).
     // Defining routeRules here would be shadowed by the server route, so we
     // intentionally do not declare them.
-    "/pricing-v5": { redirect: { to: "/pricing", statusCode: 301 } },
-    ...localizedPricingRedirectRules,
-    "/pricing": { isr: 3600 },
-    "/jobs": { isr: 3600 },
-    "/jobs/**": { isr: 3600 },
-    ...localizedPublicRouteRules,
   },
 
   nitro: {
@@ -346,36 +300,11 @@ export default defineNuxtConfig({
           // Content-Security-Policy is set dynamically with a per-request
           // nonce in server/middleware/csp.ts — do NOT add a static CSP here
           // as it would override the nonce and break the XSS protection.
-          // Block indexing for all non-public routes by default;
-          // overridden below for /jobs/** which should be indexable.
+          // Reqcore is a private, logged-in application; no route needs
+          // public indexing. Keep the default noindex for everything.
           "X-Robots-Tag": "noindex, nofollow",
         },
       },
-      // Public marketing pages — allow indexing
-      "/pricing": {
-        headers: {
-          "X-Robots-Tag": "index, follow",
-        },
-      },
-      "/jobs/**": {
-        headers: {
-          "X-Robots-Tag": "index, follow",
-        },
-      },
-      "/jobs": {
-        headers: {
-          "X-Robots-Tag": "index, follow",
-        },
-      },
-      // Branded per-org career pages — allow indexing (disabled/missing pages
-      // set a page-level noindex meta tag to opt back out).
-      "/career/**": {
-        headers: {
-          "X-Robots-Tag": "index, follow",
-        },
-      },
-      // Localized public marketing pages — allow indexing
-      ...localizedPublicRobotsRules,
       // Allow same-origin framing for inline PDF preview in the sidebar iframe
       "/api/documents/*/preview": {
         headers: {
