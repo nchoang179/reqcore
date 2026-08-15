@@ -104,6 +104,7 @@ export class ActiveRoleLimitError extends Error {
  * this by auto-closing roles.
  */
 export async function assertActiveRoleLimit(orgId: string): Promise<void> {
+  if (isBillingDisabled()) return // self-hosted (no Stripe): role cap not enforced
   const tier = await resolveOrgPlanId(orgId)
   const limit = activeRoleLimitForTier(tier)
   if (!Number.isFinite(limit)) return // agency / unlimited

@@ -197,6 +197,12 @@ const isEmpty = computed(() =>
     <!-- ─── Dashboard content ─── -->
     <template v-else>
       <!-- ─── Header ─── -->
+      <div class="mb-6 sm:mb-8">
+        <h1 class="text-2xl sm:text-[28px] font-bold tracking-tight text-surface-900 dark:text-surface-100">Dashboard</h1>
+        <p class="mt-1 text-sm text-surface-500 dark:text-surface-400">
+          Recruiting overview · {{ now.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }) }}
+        </p>
+      </div>
 
       <!-- ─── Stat cards ─── -->
       <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6 sm:mb-10">
@@ -298,9 +304,9 @@ const isEmpty = computed(() =>
       </div>
 
       <!-- ─── Main content grid ─── -->
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <!-- ─── Left column (2/3) ─── -->
-        <div class="lg:col-span-2 space-y-6">
+      <div class="grid grid-cols-1 lg:grid-cols-6 gap-6">
+        <!-- ─── Hiring Pipeline (full width) ─── -->
+        <div class="lg:col-span-6">
           <!-- ─── Pipeline overview (per job) ─── -->
           <div class="rounded-2xl border border-surface-200/80 dark:border-surface-800 bg-white dark:bg-surface-900 overflow-hidden shadow-xs dark:shadow-none">
             <div class="flex items-center justify-between px-6 py-4 border-b border-surface-100 dark:border-surface-800">
@@ -383,7 +389,10 @@ const isEmpty = computed(() =>
             </div>
           </div>
 
-          <!-- ─── Recent applications ─── -->
+        </div>
+
+        <!-- ─── Recent applications ─── -->
+        <div class="lg:col-span-4">
           <div class="rounded-2xl border border-surface-200/80 dark:border-surface-800 bg-white dark:bg-surface-900 overflow-hidden shadow-xs dark:shadow-none">
             <div class="flex items-center justify-between px-6 py-4 border-b border-surface-100 dark:border-surface-800">
               <div class="flex items-center gap-2.5">
@@ -449,8 +458,8 @@ const isEmpty = computed(() =>
           </div>
         </div>
 
-        <!-- ─── Right column (1/3) ─── -->
-        <div class="space-y-6">
+        <!-- ─── Right column (2/6) ─── -->
+        <div class="lg:col-span-2 space-y-6">
           <!-- ─── Upcoming interviews ─── -->
           <div class="rounded-2xl border border-surface-200/80 dark:border-surface-800 bg-white dark:bg-surface-900 overflow-hidden shadow-xs dark:shadow-none">
             <div class="flex items-center justify-between px-5 py-4 border-b border-surface-100 dark:border-surface-800">
