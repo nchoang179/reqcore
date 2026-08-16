@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -22,6 +23,8 @@ jobs:
     name: Build & Push Docker Image
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
 
     steps:
       # ── 1. Checkout (needed for path context so .dockerignore is respected) ──
@@ -113,3 +116,86 @@ jobs:
                 echo "Signing ${image}@${DIGEST}"
                 cosign sign --yes "${image}@${DIGEST}"
               done
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Deploy to self-hosted machine.
+  #
+  # The runner only orchestrates over SSH — the container runs on your
+  # machine, so GitHub-hosted runners are sufficient (no self-hosted runner
+  # needed). Deploys the exact digest built above, so what ships is exactly
+  # what was tested/signed. DB migrations run automatically at app boot
+  # (server/plugins/migrations.ts).
+  #
+  # Repository settings (Settings → Secrets and variables → Actions):
+  #   Secrets:
+  #     DEPLOY_HOST         host or ip, e.g. 203.0.113.10
+  #     DEPLOY_USER         ssh user, e.g. deploy
+  #     DEPLOY_SSH_KEY      private SSH key (public key added to the
+  #                         machine's ~/.ssh/authorized_keys)
+  #   Variables:
+  #     DEPLOY_KNOWN_HOSTS  output of: ssh-keyscan -H <host>
+  #     DEPLOY_PATH         absolute path to the compose dir on the machine,
+  #                         e.g. /opt/reqcore (must contain your compose file
+  #                         — docker-compose.production.yml copied there and
+  #                         renamed docker-compose.yml works — plus your .env)
+  #
+  # If the variables are unset (e.g. upstream open-source forks) the job is
+  # skipped automatically.
+  # ─────────────────────────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy to self-hosted machine
+    needs: docker
+    if: >
+      needs.docker.result == 'success' &&
+      vars.DEPLOY_HOST != '' &&
+      vars.DEPLOY_PATH != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: production
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          echo "${{ vars.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Pull image & restart app container
+        env:
+          IMAGE: ghcr.io/${{ github.repository }}@${{ needs.docker.outputs.digest }}
+          HOST: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
+          PATH_: ${{ vars.DEPLOY_PATH }}
+        run: |
+          set -euo pipefail
+          # Pull by immutable digest (exactly what the build job produced),
+          # retag it to the tag the compose file references, then recreate
+          # only the app container. Requires the compose file's app service
+          # to use image ghcr.io/reqcore-inc/reqcore:latest.
+          ssh "$HOST" "cd '$PATH_' && \
+            docker pull '$IMAGE' && \
+            docker tag '$IMAGE' ghcr.io/${{ github.repository }}:latest && \
+            docker compose up -d --no-deps app && \
+            docker image prune -f"
+
+      - name: Health check
+        env:
+          HOST: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
+          PATH_: ${{ vars.DEPLOY_PATH }}
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 12); do
+            code=$(ssh "$HOST" 'curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/ || true')
+            # Anything below 500 means the server is up (root may redirect
+            # to sign-in).
+            if [ "$code" != "000" ] && [ "$code" -lt 500 ]; then
+              echo "App is up (HTTP $code)"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::App did not become healthy in time — last logs:"
+          ssh "$HOST" "cd '$PATH_' && docker compose logs --tail 50 app" || true
+          exit 1
