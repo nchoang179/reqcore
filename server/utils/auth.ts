@@ -417,6 +417,13 @@ function getAuth(): Auth {
       // using BETTER_AUTH_SECRET as the encryption key.
       account: {
         encryptOAuthTokens: true,
+        // Social sign-in with an email that already has an account links to
+        // that account instead of failing with account_not_linked. Local
+        // email verification is not required for the link: this app defers
+        // verification (deferredEmailVerification), so most local accounts
+        // are unverified, and the social provider already vouches for the
+        // email (Google is a trusted provider asserting email_verified).
+        accountLinking: { enabled: true, requireLocalEmailVerified: false },
       },
 
       // ── Rate Limiting (built-in, database-backed) ──────────
