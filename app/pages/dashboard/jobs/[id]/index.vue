@@ -2087,7 +2087,7 @@ function closeDocPreview() {
 
             <!-- Detail tabs -->
             <div class="shrink-0 border-b border-surface-200/80 bg-white px-4 sm:px-6 py-1 dark:border-surface-800/60 dark:bg-surface-900">
-              <div ref="tabBar" role="tablist" aria-label="Candidate detail" class="relative mx-auto flex items-center gap-0.5 whitespace-nowrap" :class="detailWidthClass">
+              <div ref="tabBar" role="tablist" aria-label="Candidate detail" class="relative mx-auto flex items-center justify-center gap-0.5 whitespace-nowrap" :class="detailWidthClass">
                 <div ref="overviewDropdownRef" class="relative shrink-0">
                   <div class="flex items-center rounded-md transition-colors duration-150" :class="detailTab === 'overview'
                     ? 'bg-brand-50 dark:bg-brand-500/15'

@@ -302,49 +302,6 @@ onUnmounted(() => {
 
         <!-- Right: Actions -->
         <div class="flex shrink-0 items-center gap-1 lg:gap-1.5 pl-2">
-          <!-- Get Started CTA (demo mode only) -->
-          <div
-            v-if="isDemo"
-            class="relative hidden sm:block"
-            @mouseenter="showDemoPlanMenu = true"
-            @mouseleave="showDemoPlanMenu = false"
-          >
-            <button
-              type="button"
-              class="group inline-flex items-center gap-2 rounded-lg border-0 bg-gradient-to-r from-brand-600 to-violet-600 px-4 py-1.5 text-[13px] font-semibold text-white shadow-md shadow-brand-600/25 transition-all duration-200 hover:-translate-y-px hover:shadow-lg hover:shadow-brand-600/30 active:translate-y-0 active:shadow-sm"
-              :aria-expanded="showDemoPlanMenu"
-              aria-haspopup="menu"
-              @click="showDemoPlanMenu = !showDemoPlanMenu"
-            >
-              <Sparkles class="size-3.5 transition-transform duration-300 group-hover:rotate-12" />
-              Get Started
-              <ChevronDown class="size-3 opacity-70 transition-transform duration-200" :class="showDemoPlanMenu ? 'rotate-180' : ''" />
-            </button>
-
-            <Transition
-              enter-active-class="transition duration-150 ease-out"
-              enter-from-class="opacity-0 scale-95 -translate-y-1"
-              enter-to-class="opacity-100 scale-100 translate-y-0"
-              leave-active-class="transition duration-100 ease-in"
-              leave-from-class="opacity-100 scale-100 translate-y-0"
-              leave-to-class="opacity-0 scale-95 -translate-y-1"
-            >
-              <div
-                v-if="showDemoPlanMenu"
-                class="absolute right-0 top-[calc(100%+6px)] z-50 w-[420px] overflow-hidden rounded-xl border border-surface-200 bg-white shadow-2xl shadow-surface-900/10 dark:border-surface-700 dark:bg-surface-950 dark:shadow-black/40"
-              >
-                <div class="border-b border-surface-100 bg-gradient-to-br from-brand-50 to-violet-50 px-4 py-3 dark:border-surface-800 dark:from-brand-950/30 dark:to-violet-950/30">
-                  <p class="text-sm font-semibold text-surface-950 dark:text-white">Start from the demo</p>
-                  <p class="mt-0.5 text-xs text-surface-500 dark:text-surface-400">
-                    Create a workspace with the plan already selected.
-                  </p>
-                </div>
-                <div class="p-3">
-                  <DemoSignupOptions compact @select="showDemoPlanMenu = false" />
-                </div>
-              </div>
-            </Transition>
-          </div>
 
           <!-- Email verification pill (only while the signed-in user is unverified) -->
           <ClientOnly>
