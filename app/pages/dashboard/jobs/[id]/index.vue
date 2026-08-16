@@ -814,6 +814,42 @@ const allowedTransitions = computed(() => {
   return APPLICATION_STATUS_TRANSITIONS[currentSummary.value.status] ?? []
 })
 
+// "Change status" dropdown
+const showStatusDropdown = ref(false)
+const statusDropdownRef = ref<HTMLElement | null>(null)
+
+const statusDotClasses: Record<string, string> = {
+  new: 'bg-blue-500',
+  screening: 'bg-violet-600',
+  interview: 'bg-amber-500',
+  offer: 'bg-teal-600',
+  hired: 'bg-green-600',
+  rejected: 'bg-surface-400',
+}
+
+function handleStatusDropdownClickOutside(event: MouseEvent) {
+  if (statusDropdownRef.value && !statusDropdownRef.value.contains(event.target as Node)) {
+    showStatusDropdown.value = false
+  }
+}
+
+watch(showStatusDropdown, (val) => {
+  if (val) {
+    setTimeout(() => document.addEventListener('click', handleStatusDropdownClickOutside), 0)
+  } else {
+    document.removeEventListener('click', handleStatusDropdownClickOutside)
+  }
+})
+
+function handleStatusOptionClick(nextStatus: string) {
+  showStatusDropdown.value = false
+  if (nextStatus === 'interview') {
+    openInterviewSchedulerForStatus()
+  } else {
+    changeStatus(nextStatus)
+  }
+}
+
 function isCurrentStatus(status: string) {
   return currentSummary.value?.status === status
 }
@@ -1392,6 +1428,7 @@ function handleKeyNavigation(event: KeyboardEvent) {
   const num = parseInt(event.key)
   if (num >= 1 && num <= 9 && allowedTransitions.value.length >= num) {
     event.preventDefault()
+    showStatusDropdown.value = false
     const targetStatus = allowedTransitions.value[num - 1]!
     if (targetStatus === 'interview') {
       openInterviewSchedulerForStatus()
@@ -1422,6 +1459,7 @@ const jobStatusBadgeClasses: Record<string, string> = {
 
 onBeforeUnmount(() => {
   document.removeEventListener('click', handleOverviewDropdownClickOutside)
+  document.removeEventListener('click', handleStatusDropdownClickOutside)
 })
 
 /**
@@ -1899,23 +1937,6 @@ function closeDocPreview() {
           </div>
 
           <template v-else>
-            <!-- Sticky status transitions (stays visible on scroll) -->
-            <div v-if="allowedTransitions.length > 0" class="shrink-0 border-b border-surface-200/80 bg-white/95 backdrop-blur-sm px-4 sm:px-6 py-2.5 dark:border-surface-800/60 dark:bg-surface-900/95">
-              <div class="mx-auto flex flex-wrap items-center gap-1.5 sm:gap-2" :class="detailWidthClass">
-                <button
-                  v-for="(nextStatus, idx) in allowedTransitions"
-                  :key="nextStatus"
-                  :disabled="isMutating"
-                  class="cursor-pointer rounded-lg px-3 py-1.5 text-xs font-semibold transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm inline-flex items-center gap-1.5"
-                  :class="transitionClasses[nextStatus] ?? 'border border-surface-300 text-surface-600 hover:bg-surface-50'"
-                  @click="nextStatus === 'interview' ? openInterviewSchedulerForStatus() : changeStatus(nextStatus)"
-                >
-                  {{ transitionLabels[nextStatus] ?? nextStatus }}
-                  <kbd class="inline-flex items-center justify-center rounded px-1 py-0.5 text-[10px] font-mono leading-none opacity-60 bg-black/10 dark:bg-white/10 min-w-[16px]">{{ idx + 1 }}</kbd>
-                </button>
-              </div>
-            </div>
-
             <!-- Scrollable container: header + tabs + content -->
             <div
               ref="detailScrollContainer"
@@ -1924,10 +1945,10 @@ function closeDocPreview() {
             >
 
             <!-- Candidate header -->
-            <div class="shrink-0 border-b border-surface-200 bg-surface-50 px-4 sm:px-6 py-3 sm:py-4 dark:border-surface-800 dark:bg-surface-900/80">
+            <div class="shrink-0 border-b border-surface-200 bg-white px-4 sm:px-6 py-3 sm:py-4 dark:border-surface-800 dark:bg-surface-900">
               <div class="mx-auto" :class="detailWidthClass">
                 <div class="flex items-start gap-4">
-                  <div class="flex size-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-400 to-brand-600 text-lg font-bold text-white shadow-lg shadow-brand-500/20 dark:from-brand-500 dark:to-brand-700 dark:shadow-brand-500/10">
+                  <div class="flex size-14 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand-400 to-brand-600 text-lg font-bold text-white shadow-lg shadow-brand-500/20 dark:from-brand-500 dark:to-brand-700 dark:shadow-brand-500/10">
                     {{ getCandidateInitials(currentSummary.candidateFirstName, currentSummary.candidateLastName) }}
                   </div>
                   <div class="min-w-0 flex-1">
@@ -1957,6 +1978,33 @@ function closeDocPreview() {
                           <Zap class="size-2.5" />
                           Auto
                         </span>
+                        <div v-if="allowedTransitions.length > 0" ref="statusDropdownRef" class="relative inline-flex">
+                          <button
+                            type="button"
+                            :disabled="isMutating"
+                            class="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-surface-300 bg-white px-2 py-1 text-[11px] font-semibold text-surface-600 shadow-sm transition-colors hover:bg-surface-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-surface-600 dark:bg-surface-800 dark:text-surface-300 dark:hover:bg-surface-700"
+                            @click="showStatusDropdown = !showStatusDropdown"
+                          >
+                            Change status
+                            <ChevronDown class="size-3" :class="{ 'rotate-180': showStatusDropdown }" />
+                          </button>
+                          <div
+                            v-if="showStatusDropdown"
+                            class="absolute left-0 top-full z-30 mt-1.5 min-w-[180px] overflow-hidden rounded-xl border border-surface-200 bg-white py-1 shadow-xl dark:border-surface-700 dark:bg-surface-800"
+                          >
+                            <button
+                              v-for="(nextStatus, idx) in allowedTransitions"
+                              :key="nextStatus"
+                              type="button"
+                              class="flex w-full cursor-pointer items-center gap-2.5 px-3 py-2 text-left text-sm font-medium text-surface-700 transition-colors hover:bg-surface-50 dark:text-surface-200 dark:hover:bg-surface-700/60"
+                              @click="handleStatusOptionClick(nextStatus)"
+                            >
+                              <span class="size-2 shrink-0 rounded-full" :class="statusDotClasses[nextStatus] ?? 'bg-surface-400'" />
+                              {{ transitionLabels[nextStatus] ?? nextStatus }}
+                              <kbd class="ml-auto inline-flex items-center justify-center rounded bg-surface-100 px-1 py-0.5 font-mono text-[10px] leading-none text-surface-400 dark:bg-surface-700 dark:text-surface-400">{{ idx + 1 }}</kbd>
+                            </button>
+                          </div>
+                        </div>
                         <span
                           v-if="currentSummary.score != null"
                           class="inline-flex shrink-0 items-center rounded-md px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset"
