@@ -5,8 +5,6 @@ import { usePreviewReadOnly } from '~/composables/usePreviewReadOnly'
 const route = useRoute()
 const isFullbleed = computed(() => !!route.meta.fullbleed)
 
-const { data: session } = await authClient.useSession(useFetch)
-
 const config = useRuntimeConfig()
 const { activeOrg } = useCurrentOrg()
 const { isUpsellOpen, openUpsell, closeUpsell } = usePreviewReadOnly()
@@ -15,8 +13,6 @@ const isDemo = computed(() => {
   const slug = config.public.demoOrgSlug
   return slug && activeOrg.value?.slug === slug
 })
-
-const isDemoAccount = computed(() => session.value?.user?.email === 'demo@reqcore.com')
 </script>
 
 <template>
@@ -24,9 +20,6 @@ const isDemoAccount = computed(() => session.value?.user?.email === 'demo@reqcor
     <AppTopBar />
     <AppToasts />
     <PreviewUpsellModal v-if="isUpsellOpen" @close="closeUpsell" />
-    <ClientOnly>
-      <DemoUpsellBanner v-if="isDemoAccount" />
-    </ClientOnly>
     <main
       :class="[
         'relative flex-1 min-h-0',

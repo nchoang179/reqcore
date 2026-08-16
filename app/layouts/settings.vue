@@ -2,8 +2,6 @@
 import { Eye } from 'lucide-vue-next'
 import { usePreviewReadOnly } from '~/composables/usePreviewReadOnly'
 
-const { data: session } = await authClient.useSession(useFetch)
-
 const config = useRuntimeConfig()
 const route = useRoute()
 const { activeOrg } = useCurrentOrg()
@@ -15,8 +13,6 @@ const isDemo = computed(() => {
   const slug = config.public.demoOrgSlug
   return slug && activeOrg.value?.slug === slug
 })
-
-const isDemoAccount = computed(() => session.value?.user?.email === 'demo@reqcore.com')
 </script>
 
 <template>
@@ -28,9 +24,6 @@ const isDemoAccount = computed(() => session.value?.user?.email === 'demo@reqcor
     <AppTopBar class="hidden lg:block" />
     <AppToasts />
     <PreviewUpsellModal v-if="isUpsellOpen" @close="closeUpsell" />
-    <ClientOnly>
-      <DemoUpsellBanner v-if="isDemoAccount" />
-    </ClientOnly>
 
     <!-- Demo mode banner -->
     <div
