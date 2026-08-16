@@ -181,7 +181,7 @@ async function handleSocialSignIn(providerId: string) {
                 Welcome back
             </h2>
             <p class="mt-1.5 text-sm text-surface-500 dark:text-surface-400">
-                Sign in to your Reqcore workspace.
+                Sign in to your ATS workspace.
             </p>
         </div>
 
