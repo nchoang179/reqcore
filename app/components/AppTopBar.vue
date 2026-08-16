@@ -119,6 +119,45 @@ const jobTabs = computed(() => {
 })
 
 // ─────────────────────────────────────────────
+// Sliding underline indicator for the job sub-nav
+// ─────────────────────────────────────────────
+
+const jobNavScroller = ref<HTMLElement | null>(null)
+const jobTabRefs = ref<Record<string, HTMLElement | null>>({})
+const activeTabTo = computed(() => jobTabs.value.find(t => isActiveRoute(t.to, t.exact))?.to ?? null)
+const tabIndicator = ref({ left: 0, width: 0, visible: false })
+
+function setJobTabRef(to: string, el: unknown) {
+  // NuxtLink exposes the component instance — unwrap to the <a> element.
+  jobTabRefs.value[to] = ((el as any)?.$el ?? el) as HTMLElement | null
+}
+
+function updateTabIndicator() {
+  const el = activeTabTo.value ? jobTabRefs.value[activeTabTo.value] : null
+  if (!el || !jobNavScroller.value) {
+    tabIndicator.value.visible = false
+    return
+  }
+  tabIndicator.value = { left: el.offsetLeft, width: el.offsetWidth, visible: true }
+  // Keep the active tab in view when the row overflows.
+  el.scrollIntoView({ inline: 'nearest', block: 'nearest', behavior: 'smooth' })
+}
+
+// post-flush: measure after the new tab's DOM exists
+watch([activeTabTo, jobTabs], () => {
+  nextTick(updateTabIndicator)
+}, { flush: 'post' })
+
+onMounted(() => {
+  nextTick(updateTabIndicator)
+  window.addEventListener('resize', updateTabIndicator)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', updateTabIndicator)
+})
+
+// ─────────────────────────────────────────────
 // Main navigation
 // ─────────────────────────────────────────────
 
@@ -213,36 +252,38 @@ onUnmounted(() => {
   <header class="sticky top-0 z-50 w-full">
     <!-- Primary navigation bar -->
   <div v-if="!activeJobId" class="relative z-20 border-b border-surface-200/80 dark:border-surface-800/80 bg-white/80 dark:bg-surface-900/80 backdrop-blur-xl">
-      <div class="flex h-14 items-center justify-between px-4 lg:px-6">
-        <!-- Left: Logo + Nav -->
+      <div class="flex h-14 items-center px-4 lg:px-6">
+        <!-- Left: Logo (spacer pushes nav to center) -->
         <div class="flex min-w-0 flex-1 items-center self-stretch gap-1 lg:gap-2">
           <!-- Logo — static brand text, no link -->
           <span class="flex shrink-0 items-center px-2 py-1.5 mr-1 lg:mr-4">
             <span class="text-[15px] font-bold text-surface-900 dark:text-surface-100 hidden sm:block tracking-tight">ATS</span>
           </span>
+        </div>
 
-          <!-- Desktop nav links — scroll horizontally once they outgrow the bar.
-               The More dropdown sits outside the scroll box so its panel, which
-               hangs below the 56px row, isn't clipped by the overflow. -->
-          <nav class="hidden md:flex min-w-0 flex-1 items-stretch self-stretch gap-0.5">
-            <div
-              ref="navScrollerRoot"
-              class="flex min-w-0 items-stretch gap-0.5 overflow-x-auto scrollbar-none"
-              @wheel="onNavWheel"
+        <!-- Desktop nav links — centered between the logo and actions; scroll
+             horizontally once they outgrow the bar. The More dropdown sits
+             outside the scroll box so its panel, which hangs below the 56px
+             row, isn't clipped by the overflow. -->
+        <nav class="hidden md:flex min-w-0 items-stretch self-stretch gap-0.5">
+          <div
+            ref="navScrollerRoot"
+            class="flex min-w-0 items-stretch gap-0.5 overflow-x-auto scrollbar-none"
+            @wheel="onNavWheel"
+          >
+            <NuxtLink
+              v-for="item in primaryNavItems"
+              :key="item.to"
+              :to="$localePath(item.to)"
+              class="relative flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3 text-[13px] font-medium transition-colors duration-200 no-underline border-b-2"
+              :class="isActiveRoute(item.to, item.exact)
+                ? 'text-brand-700 dark:text-brand-300 border-brand-600 dark:border-brand-400'
+                : 'text-surface-600 dark:text-surface-400 hover:text-surface-900 dark:hover:text-surface-100 border-transparent hover:border-surface-200 dark:hover:border-surface-700'"
             >
-              <NuxtLink
-                v-for="item in primaryNavItems"
-                :key="item.to"
-                :to="$localePath(item.to)"
-                class="relative flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3 text-[13px] font-medium transition-colors duration-200 no-underline border-b-2"
-                :class="isActiveRoute(item.to, item.exact)
-                  ? 'text-brand-700 dark:text-brand-300 border-brand-600 dark:border-brand-400'
-                  : 'text-surface-600 dark:text-surface-400 hover:text-surface-900 dark:hover:text-surface-100 border-transparent hover:border-surface-200 dark:hover:border-surface-700'"
-              >
-                <component :is="item.icon" class="size-4" />
-                {{ item.label }}
-              </NuxtLink>
-            </div>
+              <component :is="item.icon" class="size-4" />
+              {{ item.label }}
+            </NuxtLink>
+          </div>
 
             <!-- More nav dropdown -->
             <div
@@ -298,10 +339,9 @@ onUnmounted(() => {
               </Transition>
             </div>
           </nav>
-        </div>
 
         <!-- Right: Actions -->
-        <div class="flex shrink-0 items-center gap-1 lg:gap-1.5 pl-2">
+        <div class="flex min-w-0 flex-1 items-center justify-end gap-1 lg:gap-1.5 pl-2">
 
           <!-- Email verification pill (only while the signed-in user is unverified) -->
           <ClientOnly>
@@ -488,7 +528,8 @@ onUnmounted(() => {
         v-if="activeJobId"
         class="relative z-10 border-b border-surface-200/60 dark:border-surface-800/60 bg-surface-50/90 dark:bg-surface-950/90 backdrop-blur-lg"
       >
-        <div class="flex items-center gap-2 sm:gap-4 px-3 sm:px-4 lg:px-6 h-10 overflow-x-auto scrollbar-none">
+        <!-- Row 1: job context -->
+        <div class="flex items-center gap-2 sm:gap-4 px-3 sm:px-4 lg:px-6 h-10">
           <NuxtLink
             :to="$localePath('/dashboard/jobs')"
             class="hidden sm:flex items-center gap-1 text-xs font-medium text-surface-400 dark:text-surface-500 hover:text-surface-600 dark:hover:text-surface-300 transition-colors no-underline shrink-0"
@@ -499,7 +540,7 @@ onUnmounted(() => {
 
           <div class="hidden sm:block w-px h-4 bg-surface-200 dark:bg-surface-700 shrink-0" />
 
-          <div class="hidden md:flex items-center gap-2 shrink-0 min-w-0">
+          <div class="flex min-w-0 items-center gap-2">
             <Briefcase class="size-3.5 text-brand-500 shrink-0" />
             <span class="text-sm font-semibold text-surface-900 dark:text-surface-100 truncate max-w-48">
               {{ activeJobTitle }}
@@ -513,24 +554,34 @@ onUnmounted(() => {
             </span>
           </div>
 
-          <nav class="flex items-center gap-0.5 md:ml-2">
+          <div class="ml-auto flex items-center gap-2 shrink-0">
+            <div id="job-sub-nav-actions" class="flex items-center gap-2" />
+          </div>
+        </div>
+
+        <!-- Row 2: tabs on their own line so they never crowd the job name -->
+        <div ref="jobNavScroller" class="relative overflow-x-auto scrollbar-none border-t border-surface-200/40 dark:border-surface-800/40">
+          <nav class="mx-auto flex h-10 w-max items-stretch gap-1 px-3 sm:px-4 lg:px-6">
             <NuxtLink
               v-for="tab in jobTabs"
               :key="tab.to"
+              :ref="(el) => setJobTabRef(tab.to, el)"
               :to="$localePath(tab.to)"
-              class="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all duration-200 no-underline whitespace-nowrap shrink-0"
+              class="relative flex items-center gap-1.5 whitespace-nowrap px-3 text-xs font-medium transition-colors duration-200 no-underline"
               :class="isActiveRoute(tab.to, tab.exact)
-                ? 'bg-white dark:bg-surface-800 text-surface-900 dark:text-surface-100 shadow-sm'
-                : 'text-surface-500 dark:text-surface-400 hover:text-surface-700 dark:hover:text-surface-200 hover:bg-white/60 dark:hover:bg-surface-800/60'"
+                ? 'text-brand-700 dark:text-brand-300'
+                : 'text-surface-500 dark:text-surface-400 hover:text-surface-800 dark:hover:text-surface-200'"
             >
               <component :is="tab.icon" class="size-3.5" />
               <span class="hidden sm:inline">{{ tab.label }}</span>
             </NuxtLink>
           </nav>
-
-          <div class="ml-auto flex items-center gap-2 shrink-0">
-            <div id="job-sub-nav-actions" class="flex items-center gap-2" />
-          </div>
+          <!-- Sliding active-tab indicator -->
+          <span
+            class="pointer-events-none absolute bottom-0 h-0.5 rounded-full bg-brand-600 transition-all duration-300 ease-out dark:bg-brand-400"
+            :class="tabIndicator.visible ? 'opacity-100' : 'opacity-0'"
+            :style="{ left: `${tabIndicator.left}px`, width: `${tabIndicator.width}px` }"
+          />
         </div>
       </div>
     </Transition>
