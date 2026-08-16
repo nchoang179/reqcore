@@ -3013,8 +3013,8 @@ function closeDocPreview() {
       <!-- ═══════════════════════════════════════ -->
       <div
         v-if="filteredApplications.length > 0"
-        class="md:hidden fixed bottom-0 left-0 right-0 z-30 border-t border-surface-200/80 bg-white dark:border-surface-800/60 dark:bg-surface-900"
-        :style="{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }"
+        class="md:hidden fixed left-0 right-0 z-30 border-t border-surface-200/80 bg-white dark:border-surface-800/60 dark:bg-surface-900"
+        :style="{ bottom: 'calc(3.5rem + env(safe-area-inset-bottom, 0px))' }"
       >
         <!-- Horizontal scrollable candidate cards -->
         <div
@@ -3080,8 +3080,8 @@ function closeDocPreview() {
       <!-- Mobile empty state for bottom bar -->
       <div
         v-else-if="focusedApplicationTotal === 0"
-        class="md:hidden fixed bottom-0 left-0 right-0 z-30 border-t border-surface-200/80 bg-white dark:border-surface-800/60 dark:bg-surface-900 px-4 py-3 text-center"
-        :style="{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }"
+        class="md:hidden fixed left-0 right-0 z-30 border-t border-surface-200/80 bg-white dark:border-surface-800/60 dark:bg-surface-900 px-4 py-3 text-center"
+        :style="{ bottom: 'calc(3.5rem + env(safe-area-inset-bottom, 0px))' }"
       >
         <p class="text-xs text-surface-400 dark:text-surface-500">
           No candidates in {{ formatStatusLabel(focusStatus) }}

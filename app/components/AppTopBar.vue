@@ -6,7 +6,7 @@ import {
   ChevronDown, Menu, X, Users, ChevronLeft,
   LayoutDashboard, Calendar, ArrowUpCircle,
   Sparkles, Radio, History,
-  MessageCircle, Languages, Lock, Inbox, Upload, Zap, Megaphone,
+  MessageCircle, Languages, Lock, Inbox, Upload, Zap, Megaphone, MoreHorizontal,
 } from 'lucide-vue-next'
 import type { PlanFeature } from '~~/shared/billing'
 
@@ -207,6 +207,10 @@ const primaryNavLabels = ['Dashboard', 'Jobs', 'Candidates', 'Applications', 'In
 const primaryNavItems = computed(() => navItems.filter(i => primaryNavLabels.includes(i.label)))
 const moreNavItems = computed(() => navItems.filter(i => !primaryNavLabels.includes(i.label)))
 
+// Mobile bottom tab bar (job context only)
+const bottomNavLabels = ['Jobs', 'Candidates', 'Applications', 'Interviews']
+const bottomNavItems = computed(() => navItems.filter(i => bottomNavLabels.includes(i.label)))
+
 // Close menus on route change
 watch(() => route.path, () => {
   showUserMenu.value = false
@@ -275,13 +279,14 @@ onUnmounted(() => {
               v-for="item in primaryNavItems"
               :key="item.to"
               :to="$localePath(item.to)"
+              :title="item.label"
               class="relative flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3 text-[13px] font-medium transition-colors duration-200 no-underline border-b-2"
               :class="isActiveRoute(item.to, item.exact)
                 ? 'text-brand-700 dark:text-brand-300 border-brand-600 dark:border-brand-400'
                 : 'text-surface-600 dark:text-surface-400 hover:text-surface-900 dark:hover:text-surface-100 border-transparent hover:border-surface-200 dark:hover:border-surface-700'"
             >
               <component :is="item.icon" class="size-4" />
-              {{ item.label }}
+              <span class="hidden lg:inline">{{ item.label }}</span>
             </NuxtLink>
           </div>
 
@@ -293,12 +298,14 @@ onUnmounted(() => {
               @mouseleave="showMoreNav = false"
             >
               <button
+                title="More"
                 class="relative flex h-full items-center gap-1.5 px-3 text-[13px] font-medium transition-colors duration-200 cursor-pointer border-0 bg-transparent border-b-2"
                 :class="moreNavItems.some(i => isActiveRoute(i.to, i.exact))
                   ? 'text-brand-700 dark:text-brand-300 border-brand-600 dark:border-brand-400'
                   : 'text-surface-600 dark:text-surface-400 hover:text-surface-900 dark:hover:text-surface-100 border-transparent hover:border-surface-200 dark:hover:border-surface-700'"
               >
-                More
+                <MoreHorizontal class="size-4 lg:hidden" />
+                <span class="hidden lg:inline">More</span>
                 <ChevronDown
                   class="size-3 opacity-60 transition-transform duration-200"
                   :class="showMoreNav ? 'rotate-180' : ''"
@@ -358,11 +365,12 @@ onUnmounted(() => {
 
           <!-- New Job button (desktop) -->
           <button
+            title="New Job"
             class="hidden sm:inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3.5 py-1.5 text-[13px] font-semibold text-white shadow-sm shadow-brand-600/20 hover:bg-brand-700 hover:shadow-md hover:shadow-brand-600/25 active:bg-brand-800 transition-all duration-200 border-0 cursor-pointer"
             @click="handleNewJobClick"
           >
             <Plus class="size-3.5" />
-            New Job
+            <span class="hidden lg:inline">New Job</span>
           </button>
 
           <!-- Divider -->
@@ -532,10 +540,10 @@ onUnmounted(() => {
         <div class="flex items-center gap-2 sm:gap-4 px-3 sm:px-4 lg:px-6 h-10">
           <NuxtLink
             :to="$localePath('/dashboard/jobs')"
-            class="hidden sm:flex items-center gap-1 text-xs font-medium text-surface-400 dark:text-surface-500 hover:text-surface-600 dark:hover:text-surface-300 transition-colors no-underline shrink-0"
+            class="flex items-center gap-1 text-xs font-medium text-surface-400 dark:text-surface-500 hover:text-surface-600 dark:hover:text-surface-300 transition-colors no-underline shrink-0"
           >
             <ChevronLeft class="size-3.5" />
-            All Jobs
+            <span class="hidden sm:inline">All Jobs</span>
           </NuxtLink>
 
           <div class="hidden sm:block w-px h-4 bg-surface-200 dark:bg-surface-700 shrink-0" />
@@ -597,7 +605,7 @@ onUnmounted(() => {
     >
       <div
         v-if="showMobileMenu"
-        class="relative z-10 md:hidden border-b border-surface-200 dark:border-surface-800 bg-white/95 dark:bg-surface-900/95 backdrop-blur-xl"
+        class="absolute inset-x-0 top-full z-50 max-h-[calc(100dvh-3.5rem)] overflow-y-auto border-b border-surface-200 bg-white/95 shadow-xl shadow-surface-900/10 backdrop-blur-xl md:hidden dark:border-surface-800 dark:bg-surface-900/95 dark:shadow-black/30"
       >
         <nav class="px-4 py-3 flex flex-col gap-1">
           <NuxtLink
@@ -630,14 +638,6 @@ onUnmounted(() => {
             <Plus class="size-4" />
             New Job
           </button>
-
-          <!-- Get Started CTA (demo mode, mobile) -->
-          <template v-if="isDemo">
-            <div class="mt-2 pt-2 border-t border-surface-200 dark:border-surface-700">
-              <p class="px-3 mb-1.5 text-xs font-medium text-surface-500 dark:text-surface-400 uppercase tracking-wider">Get Started</p>
-              <DemoSignupOptions compact @select="showMobileMenu = false" />
-            </div>
-          </template>
         </nav>
 
         <div class="px-4 pb-3 flex flex-col gap-2 border-t border-surface-100 dark:border-surface-800 pt-3 lg:hidden">
@@ -647,6 +647,41 @@ onUnmounted(() => {
       </div>
     </Transition>
   </header>
+
+  <!-- Backdrop behind the mobile drawer — blurs the page content -->
+  <Transition
+    enter-active-class="transition duration-200 ease-out"
+    enter-from-class="opacity-0"
+    enter-to-class="opacity-100"
+    leave-active-class="transition duration-150 ease-in"
+    leave-from-class="opacity-100"
+    leave-to-class="opacity-0"
+  >
+    <div
+      v-if="showMobileMenu"
+      class="fixed inset-0 z-40 bg-surface-900/20 backdrop-blur-sm md:hidden dark:bg-black/40"
+      @click="showMobileMenu = false"
+    />
+  </Transition>
+
+  <!-- Mobile bottom tab bar -->
+  <div
+    class="fixed bottom-0 left-0 right-0 z-50 flex md:hidden items-stretch border-t border-surface-200/80 bg-white/95 backdrop-blur-xl dark:border-surface-800/80 dark:bg-surface-900/95"
+    :style="{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }"
+  >
+    <NuxtLink
+      v-for="item in bottomNavItems"
+      :key="`bottom-${item.to}`"
+      :to="$localePath(item.to)"
+      class="flex flex-1 flex-col items-center justify-center gap-0.5 py-2 text-[10px] font-medium transition-colors no-underline"
+      :class="isActiveRoute(item.to, item.exact)
+        ? 'text-brand-700 dark:text-brand-300'
+        : 'text-surface-500 dark:text-surface-400'"
+    >
+      <component :is="item.icon" class="size-5" />
+      {{ item.label }}
+    </NuxtLink>
+  </div>
 
   <!-- Feedback modal -->
   <FeedbackModal v-if="showFeedbackModal" @close="showFeedbackModal = false" />
