@@ -1544,24 +1544,6 @@ function closeDocPreview() {
       <!-- Quick actions teleported to sub-nav bar -->
       <JobSubNavActions :job-id="jobId" />
 
-      <!-- Keyboard shortcut hints in sub-nav bar (pipeline-specific) -->
-      <Teleport to="#job-sub-nav-actions">
-        <div class="hidden sm:flex items-center gap-2 text-[10px] font-medium text-surface-400 dark:text-surface-500">
-          <div class="flex items-center gap-1 rounded-md bg-surface-100/80 px-2 py-0.5 dark:bg-surface-800/60">
-            <span class="font-mono text-[10px]">↑↓</span>
-            <span>candidates</span>
-          </div>
-          <div class="flex items-center gap-1 rounded-md bg-surface-100/80 px-2 py-0.5 dark:bg-surface-800/60">
-            <span class="font-mono text-[10px]">←→</span>
-            <span>stages</span>
-          </div>
-          <div class="flex items-center gap-1 rounded-md bg-surface-100/80 px-2 py-0.5 dark:bg-surface-800/60">
-            <span class="font-mono text-[10px]">1-9</span>
-            <span>actions</span>
-          </div>
-        </div>
-      </Teleport>
-
       <!-- ═══════════════════════════════════════ -->
       <!-- PIPELINE STATUS TABS                     -->
       <!-- ═══════════════════════════════════════ -->
