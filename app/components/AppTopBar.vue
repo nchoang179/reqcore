@@ -34,6 +34,7 @@ const isDemo = computed(() => {
 
 const userName = computed(() => session.value?.user?.name ?? 'User')
 const userEmail = computed(() => session.value?.user?.email ?? '')
+const userImage = computed(() => session.value?.user?.image ?? null)
 const userInitials = computed(() => {
   const name = userName.value
   const parts = name.split(' ').filter(Boolean)
@@ -376,7 +377,16 @@ onUnmounted(() => {
               class="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-surface-100/80 dark:hover:bg-surface-800/60 transition-all duration-200 cursor-pointer border-0 bg-transparent"
               @click="showUserMenu = !showUserMenu"
             >
-              <div class="flex items-center justify-center size-7 rounded-full bg-gradient-to-br from-brand-500 to-brand-700 text-white text-[11px] font-bold shadow-sm">
+              <img
+                v-if="userImage"
+                :src="userImage"
+                :alt="userName"
+                class="size-7 rounded-full object-cover shadow-sm"
+              >
+              <div
+                v-else
+                class="flex items-center justify-center size-7 rounded-full bg-gradient-to-br from-brand-500 to-brand-700 text-white text-[11px] font-bold shadow-sm"
+              >
                 {{ userInitials }}
               </div>
               <ChevronDown
