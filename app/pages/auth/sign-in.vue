@@ -17,7 +17,6 @@ const password = ref("");
 const error = ref("");
 const isLoading = ref(false);
 const socialLoading = ref<string | null>(null);
-const ssoRedirecting = ref(false);
 const emailInput = ref<HTMLInputElement | null>(null);
 const route = useRoute();
 const config = useRuntimeConfig();
@@ -148,50 +147,6 @@ async function handleSelfHostedSso() {
 }
 
 /**
- * Enterprise SSO — per-organization provider routing by email domain.
- * Uses Better Auth's SSO plugin: signIn.sso({ email, callbackURL })
- */
-async function handleEnterpriseSso() {
-    if (!email.value) {
-        error.value = "Enter your work email address to sign in with SSO.";
-        return;
-    }
-
-    ssoRedirecting.value = true;
-    error.value = "";
-    const pendingInvitation = route.query.invitation as string | undefined;
-    const callbackURL = pendingInvitation
-        ? localePath(`/auth/accept-invitation/${pendingInvitation}`)
-        : localePath("/dashboard");
-    const errorCallbackURL = pendingInvitation
-        ? localePath(
-              `/auth/sign-in?invitation=${encodeURIComponent(pendingInvitation)}`,
-          )
-        : localePath("/auth/sign-in");
-
-    try {
-        const result = await authClient.signIn.sso({
-            email: email.value,
-            callbackURL,
-            errorCallbackURL,
-        });
-
-        if (result.error) {
-            error.value =
-                result.error.message ??
-                "No SSO provider found for this email domain. Sign in with email and password instead.";
-            ssoRedirecting.value = false;
-        }
-    } catch (e: unknown) {
-        error.value =
-            e instanceof Error
-                ? e.message
-                : "SSO sign-in failed. Please try again.";
-        ssoRedirecting.value = false;
-    }
-}
-
-/**
  * Social sign-in — Google, GitHub, Microsoft.
  * Uses better-auth's built-in signIn.social() which handles the full OAuth redirect flow.
  */
@@ -244,7 +199,7 @@ async function handleSocialSignIn(providerId: string) {
                     v-for="provider in socialProviders"
                     :key="provider.id"
                     type="button"
-                    :disabled="!!socialLoading || isLoading || ssoRedirecting"
+                    :disabled="!!socialLoading || isLoading"
                     class="relative px-4 py-2.5 rounded-lg text-sm font-medium shadow-sm transition-all flex items-center justify-center gap-3 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-800 text-surface-800 dark:text-surface-200 hover:bg-surface-50 dark:hover:bg-surface-700 hover:border-surface-300 dark:hover:border-surface-600"
                     @click="handleSocialSignIn(provider.id)"
                 >
@@ -441,42 +396,6 @@ async function handleSocialSignIn(providerId: string) {
         >
             {{ isLoading ? "Signing in…" : "Sign in" }}
         </button>
-
-        <!-- Enterprise SSO button — always available on cloud, uses per-org providers -->
-        <template v-if="!oidcEnabled">
-            <div class="relative">
-                <div class="absolute inset-0 flex items-center">
-                    <div
-                        class="w-full border-t border-surface-200 dark:border-surface-700"
-                    />
-                </div>
-                <div class="relative flex justify-center text-xs">
-                    <span
-                        class="bg-white dark:bg-surface-900 px-2 text-surface-400"
-                        >or</span
-                    >
-                </div>
-            </div>
-
-            <button
-                type="button"
-                :disabled="ssoRedirecting"
-                class="px-4 py-2.5 bg-surface-900 dark:bg-white text-white dark:text-surface-900 rounded-lg text-sm font-semibold shadow-md cursor-pointer hover:bg-surface-800 dark:hover:bg-surface-100 disabled:opacity-60 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2.5 ring-1 ring-surface-700 dark:ring-surface-300"
-                @click="handleEnterpriseSso"
-            >
-                <ShieldCheck class="size-4" />
-                {{
-                    ssoRedirecting
-                        ? "Redirecting to your IdP…"
-                        : "Sign in with SSO"
-                }}
-                <span
-                    v-if="!ssoRedirecting"
-                    class="inline-flex items-center rounded-full bg-white/15 dark:bg-surface-900/15 px-1.5 py-0.5 text-[10px] font-medium text-white/80 dark:text-surface-900/80 ring-1 ring-white/20 dark:ring-surface-900/20"
-                    >Beta</span
-                >
-            </button>
-        </template>
 
         <p class="text-center text-sm text-surface-500 dark:text-surface-400">
             Don't have an account?
